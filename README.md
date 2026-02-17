@@ -1,16 +1,19 @@
 # db-view-mcp
 
-MCP server that gives AI assistants direct access to PostgreSQL and ClickHouse databases. Connects via stdio transport and exposes tools for querying, schema inspection, and data manipulation.
+MCP server that gives AI assistants direct access to PostgreSQL and ClickHouse databases. Supports stdio and HTTP transports, allowing both local IDE integration and remote network access.
 
 ## Features
 
 - **Multi-database** — connect to any number of PostgreSQL and ClickHouse instances simultaneously
+- **Dual transport** — stdio for IDE integration (Cursor, Claude Code), HTTP for remote/multi-client access
 - **Read & write tools** — SELECT queries with row limits, INSERT/UPDATE/DELETE, DDL, transactions
 - **Schema introspection** — list tables, describe columns, export full DDL
 - **Query analysis** — EXPLAIN ANALYZE support, slow query tracking
 - **SQL safety** — read-only tools validate SQL to block accidental writes
 - **Flexible tool modes** — single tool with `database` parameter, or separate tool per database
 - **Lazy connections** — databases connect on first use by default
+- **Bearer auth** — optional token-based authentication for HTTP transport
+- **Session management** — stateful (per-session MCP server) or stateless HTTP mode
 
 ## Quick start
 
@@ -37,13 +40,37 @@ Copy the example config and edit it:
 cp config.example.json config.json
 ```
 
+Minimal config (stdio, default):
+
 ```json
 {
-  "defaults": {
-    "maxRows": 100,
-    "lazyConnection": true,
-    "toolsPerDatabase": false,
-    "queryTimeout": 30000
+  "databases": [
+    {
+      "id": "main_pg",
+      "type": "postgresql",
+      "host": "localhost",
+      "port": 5432,
+      "database": "myapp",
+      "user": "admin",
+      "password": "secret123"
+    }
+  ]
+}
+```
+
+HTTP transport config:
+
+```json
+{
+  "transport": {
+    "type": "http",
+    "port": 3000,
+    "host": "127.0.0.1",
+    "stateless": false,
+    "auth": {
+      "type": "bearer",
+      "token": "your-secret-token"
+    }
   },
   "databases": [
     {
@@ -53,17 +80,7 @@ cp config.example.json config.json
       "port": 5432,
       "database": "myapp",
       "user": "admin",
-      "password": "secret123",
-      "description": "Main PostgreSQL"
-    },
-    {
-      "id": "analytics",
-      "type": "clickhouse",
-      "url": "http://localhost:8123",
-      "database": "analytics",
-      "user": "default",
-      "password": "",
-      "description": "ClickHouse analytics"
+      "password": "secret123"
     }
   ]
 }
@@ -72,17 +89,22 @@ cp config.example.json config.json
 ### Run
 
 ```bash
+# Stdio (default)
+npm start -- --config config.json
+
+# HTTP via config (set transport.type to "http" in config.json)
+npm start -- --config config.json
+
+# HTTP via CLI flag (overrides config)
+npm start -- --config config.json --transport http
+
 # Development (no build needed)
 npm run dev -- --config config.json
-
-# Production
-npm run build
-npm start -- --config config.json
 ```
 
 ### Add to your MCP client
 
-Claude Desktop (`claude_desktop_config.json`):
+**Claude Desktop** (`claude_desktop_config.json`) — stdio:
 
 ```json
 {
@@ -95,7 +117,7 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-Claude Code (`.mcp.json`):
+**Claude Code** (`.mcp.json`) — stdio:
 
 ```json
 {
@@ -106,6 +128,93 @@ Claude Code (`.mcp.json`):
     }
   }
 }
+```
+
+**Any MCP client** — HTTP:
+
+```bash
+# Start the server
+node dist/index.js --config config.json --transport http
+# Server listens on http://127.0.0.1:3000/mcp
+```
+
+## Transport modes
+
+### Stdio (default)
+
+Communication via stdin/stdout. Best for local IDE integrations where the MCP client spawns the server process.
+
+### HTTP
+
+Uses the MCP Streamable HTTP transport (`POST/GET/DELETE /mcp`). Best for:
+- Remote access over the network
+- Multiple clients connecting simultaneously
+- Web application integrations
+
+**Stateful mode** (default): each MCP session gets its own `McpServer` instance with a unique session ID. All sessions share database connection pools. Supports transactions across requests within the same session.
+
+**Stateless mode** (`"stateless": true`): no session management. Each request is independent. Suitable for simple query scenarios without transactions.
+
+#### HTTP endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/mcp` | Send JSON-RPC requests (initialize, tools/call, etc.) |
+| `GET` | `/mcp` | SSE stream for server-to-client notifications |
+| `DELETE` | `/mcp` | Close a session |
+| `GET` | `/health` | Health check — status, active sessions, database list |
+
+#### Authentication
+
+Optional bearer token authentication:
+
+```json
+{
+  "transport": {
+    "type": "http",
+    "auth": {
+      "type": "bearer",
+      "token": "your-secret-token"
+    }
+  }
+}
+```
+
+Requests to `/mcp` must include `Authorization: Bearer your-secret-token`. Requests without a valid token receive `401 Unauthorized`. The `/health` endpoint is not protected.
+
+#### Example: initialize a session
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer your-secret-token" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {},
+      "clientInfo": { "name": "test", "version": "1.0" }
+    }
+  }'
+```
+
+The response includes a `Mcp-Session-Id` header. Use it in subsequent requests:
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Mcp-Session-Id: <session-id-from-init>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  }'
 ```
 
 ## Tools
@@ -130,6 +239,19 @@ Claude Code (`.mcp.json`):
 | `transaction` | Begin, execute within, commit, or rollback transactions (PostgreSQL only) |
 
 ## Configuration
+
+### Transport
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `transport.type` | `"stdio"` \| `"http"` | `"stdio"` | Transport mode |
+| `transport.port` | number | `3000` | HTTP listen port |
+| `transport.host` | string | `"127.0.0.1"` | HTTP bind address |
+| `transport.stateless` | boolean | `false` | Disable session management |
+| `transport.auth.type` | `"bearer"` | — | Authentication type |
+| `transport.auth.token` | string | — | Bearer token value |
+
+The `transport` field is optional. When omitted, stdio is used. The `--transport` CLI flag overrides the config value.
 
 ### Defaults
 
@@ -180,11 +302,11 @@ Set `"toolsPerDatabase": true` in defaults to register a separate tool for each 
 
 ```
 src/
-├── index.ts              Entry point: CLI args → config → server → stdio
-├── server.ts             Creates McpServer, resolves configs, registers tools
+├── index.ts              Entry point: CLI args → config → transport routing
+├── server.ts             Creates McpServer + ConnectorManager, registers tools
 ├── config/
-│   ├── types.ts          Zod schemas for config validation
-│   └── loader.ts         Reads and parses config file
+│   ├── types.ts          Zod schemas for config validation (transport, databases)
+│   └── loader.ts         Reads config file, parses CLI args (--config, --transport)
 ├── connectors/
 │   ├── interface.ts      Connector interface and shared types
 │   ├── manager.ts        Connector lifecycle (lazy/eager, create, disconnect)
@@ -194,6 +316,8 @@ src/
 │   ├── registry.ts       Registers tools in parameter or per-database mode
 │   ├── readonly/         query, list-tables, describe-table, schema, explain, performance
 │   └── write/            execute, transaction
+├── transport/
+│   └── http.ts           HTTP transport: Express app, session management, auth
 └── utils/
     ├── response.ts       Standardized MCP response formatting
     └── sql-validator.ts   Blocks write keywords in read-only queries

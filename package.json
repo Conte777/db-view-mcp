@@ -27,10 +27,12 @@
   "dependencies": {
     "@clickhouse/client": "^1.17.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "express": "^5.2.1",
     "pg": "^8.18.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/express": "^5.0.3",
     "@types/node": "^25.2.3",
     "@types/pg": "^8.16.0",
     "tsx": "^4.21.0",

@@ -3,25 +3,49 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig, parseCliArgs } from "./config/loader.js";
 import { createServer } from "./server.js";
+import { startHttpTransport } from "./transport/http.js";
+import type { HttpTransportConfig } from "./config/types.js";
 
 async function main() {
-  const { configPath } = parseCliArgs(process.argv.slice(2));
+  const { configPath, transport: cliTransport } = parseCliArgs(process.argv.slice(2));
   const config = loadConfig(configPath);
 
-  const { server, manager } = await createServer(config);
+  // CLI --transport overrides config
+  const transportType = cliTransport ?? config.transport.type;
 
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  if (transportType === "http") {
+    const transportConfig: HttpTransportConfig =
+      config.transport.type === "http"
+        ? config.transport
+        : { type: "http" as const, port: 3000, host: "127.0.0.1", stateless: false };
 
-  process.on("SIGINT", async () => {
-    await manager.disconnectAll();
-    process.exit(0);
-  });
+    const { httpServer, manager } = await startHttpTransport(config, transportConfig);
 
-  process.on("SIGTERM", async () => {
-    await manager.disconnectAll();
-    process.exit(0);
-  });
+    const shutdown = async () => {
+      console.error("Shutting down HTTP server...");
+      httpServer.close();
+      await manager.disconnectAll();
+      process.exit(0);
+    };
+
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  } else {
+    const { server, manager } = await createServer(config);
+
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+
+    process.on("SIGINT", async () => {
+      await manager.disconnectAll();
+      process.exit(0);
+    });
+
+    process.on("SIGTERM", async () => {
+      await manager.disconnectAll();
+      process.exit(0);
+    });
+  }
 }
 
 main().catch((err) => {

@@ -40,7 +40,28 @@ const DefaultsSchema = z.object({
   queryTimeout: z.number().default(30000),
 });
 
+const HttpTransportConfigSchema = z.object({
+  type: z.literal("http"),
+  port: z.number().default(3000),
+  host: z.string().default("127.0.0.1"),
+  stateless: z.boolean().default(false),
+  auth: z.object({
+    type: z.literal("bearer"),
+    token: z.string(),
+  }).optional(),
+});
+
+const StdioTransportConfigSchema = z.object({
+  type: z.literal("stdio"),
+});
+
+const TransportConfigSchema = z.discriminatedUnion("type", [
+  StdioTransportConfigSchema,
+  HttpTransportConfigSchema,
+]);
+
 export const AppConfigSchema = z.object({
+  transport: TransportConfigSchema.optional().default({ type: "stdio" }),
   defaults: DefaultsSchema.optional().transform((v) => v ?? {
     maxRows: 100,
     lazyConnection: true,
@@ -55,6 +76,8 @@ export type ClickHouseConfig = z.infer<typeof ClickHouseConfigSchema>;
 export type DatabaseConfig = z.infer<typeof DatabaseConfigSchema>;
 export type Defaults = z.infer<typeof DefaultsSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type HttpTransportConfig = z.infer<typeof HttpTransportConfigSchema>;
+export type TransportConfig = z.infer<typeof TransportConfigSchema>;
 
 export type ResolvedDatabaseConfig = DatabaseConfig & {
   lazyConnection: boolean;

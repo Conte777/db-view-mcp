@@ -9,10 +9,24 @@ export function loadConfig(configPath: string): AppConfig {
   return AppConfigSchema.parse(json);
 }
 
-export function parseCliArgs(args: string[]): { configPath: string } {
+export function parseCliArgs(args: string[]): { configPath: string; transport?: "stdio" | "http" } {
   const configIndex = args.indexOf("--config");
   if (configIndex === -1 || configIndex + 1 >= args.length) {
-    throw new Error("Usage: db-view-mcp --config <path-to-config.json>");
+    throw new Error("Usage: db-view-mcp --config <path-to-config.json> [--transport stdio|http]");
   }
-  return { configPath: args[configIndex + 1] };
+
+  const result: { configPath: string; transport?: "stdio" | "http" } = {
+    configPath: args[configIndex + 1],
+  };
+
+  const transportIndex = args.indexOf("--transport");
+  if (transportIndex !== -1 && transportIndex + 1 < args.length) {
+    const value = args[transportIndex + 1];
+    if (value !== "stdio" && value !== "http") {
+      throw new Error(`Invalid transport: "${value}". Must be "stdio" or "http".`);
+    }
+    result.transport = value;
+  }
+
+  return result;
 }

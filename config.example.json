@@ -1,4 +1,14 @@
 {
+  "transport": {
+    "type": "http",
+    "port": 3000,
+    "host": "127.0.0.1",
+    "stateless": false,
+    "auth": {
+      "type": "bearer",
+      "token": "your-secret-token"
+    }
+  },
   "defaults": {
     "maxRows": 100,
     "lazyConnection": true,
