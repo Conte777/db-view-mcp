@@ -1,12 +1,6 @@
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
-import type {
-  Connector,
-  QueryResult,
-  TableInfo,
-  ColumnInfo,
-  ExplainResult,
-  TransactionHandle,
-} from "./interface.js";
+import { readFileSync } from "node:fs";
+import type { Connector, QueryResult, TableInfo, ColumnInfo, ExplainResult, TransactionHandle } from "./interface.js";
 import type { ClickHouseConfig } from "../config/types.js";
 
 export class ClickHouseConnector implements Connector {
@@ -23,12 +17,22 @@ export class ClickHouseConnector implements Connector {
   }
 
   async connect(): Promise<void> {
+    const tlsConfig = this.config.tls?.ca
+      ? {
+          ca_cert: this.config.tls.ca.startsWith("-----BEGIN")
+            ? Buffer.from(this.config.tls.ca)
+            : readFileSync(this.config.tls.ca),
+          reject_unauthorized: this.config.tls.rejectUnauthorized,
+        }
+      : undefined;
+
     this.client = createClient({
       url: this.config.url,
       database: this.config.database,
       username: this.config.user,
       password: this.config.password,
       request_timeout: this.queryTimeout,
+      ...(tlsConfig && { tls: tlsConfig }),
     });
     await this.client.ping();
   }

@@ -1,14 +1,20 @@
 const WRITE_KEYWORDS = [
-  "INSERT", "UPDATE", "DELETE", "DROP",
-  "ALTER", "TRUNCATE", "CREATE",
-  "GRANT", "REVOKE", "REPLACE", "MERGE",
-  "COPY", "CALL",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "DROP",
+  "ALTER",
+  "TRUNCATE",
+  "CREATE",
+  "GRANT",
+  "REVOKE",
+  "REPLACE",
+  "MERGE",
+  "COPY",
+  "CALL",
 ];
 
-const WRITE_PATTERN = new RegExp(
-  `\\b(${WRITE_KEYWORDS.join("|")})\\b`,
-  "i",
-);
+const WRITE_PATTERN = new RegExp(`\\b(${WRITE_KEYWORDS.join("|")})\\b`, "i");
 
 export interface ValidationResult {
   valid: boolean;

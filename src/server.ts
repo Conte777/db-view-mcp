@@ -4,16 +4,11 @@ import { registerTools } from "./tools/registry.js";
 import { resolveDbConfig, type AppConfig } from "./config/types.js";
 
 export function createConnectorManager(config: AppConfig): ConnectorManager {
-  const resolvedDbs = config.databases.map((db) =>
-    resolveDbConfig(db, config.defaults),
-  );
+  const resolvedDbs = config.databases.map((db) => resolveDbConfig(db, config.defaults));
   return new ConnectorManager(resolvedDbs);
 }
 
-export function createMcpServerInstance(
-  manager: ConnectorManager,
-  config: AppConfig,
-): McpServer {
+export function createMcpServerInstance(manager: ConnectorManager, config: AppConfig): McpServer {
   const server = new McpServer({
     name: "db-view-mcp",
     version: "1.0.0",

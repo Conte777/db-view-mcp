@@ -6,12 +6,7 @@ import { InstrumentedConnector } from "./instrumented.js";
 import { PerformanceTracker } from "../tools/readonly/performance.js";
 import { getLogger } from "../utils/logger.js";
 
-const CONNECTION_ERROR_CODES = new Set([
-  "ECONNREFUSED",
-  "ECONNRESET",
-  "EPIPE",
-  "ETIMEDOUT",
-]);
+const CONNECTION_ERROR_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT"]);
 
 function isConnectionError(err: unknown): boolean {
   if (err instanceof Error) {
@@ -100,6 +95,37 @@ export class ConnectorManager {
       return new ClickHouseConnector(config, config.queryTimeout, config.maxRows);
     }
     throw new Error(`Unsupported database type: ${(config as { type: string }).type}`);
+  }
+
+  updateDatabases(newConfigs: ResolvedDatabaseConfig[]): { added: string[]; removed: string[]; changed: string[] } {
+    const newMap = new Map(newConfigs.map((c) => [c.id, c]));
+    const added: string[] = [];
+    const removed: string[] = [];
+    const changed: string[] = [];
+
+    // Removed databases
+    for (const id of this.configs.keys()) {
+      if (!newMap.has(id)) {
+        removed.push(id);
+        this.invalidateConnector(id);
+        this.configs.delete(id);
+      }
+    }
+
+    // Added and changed databases
+    for (const [id, cfg] of newMap) {
+      const old = this.configs.get(id);
+      if (!old) {
+        added.push(id);
+        this.configs.set(id, cfg);
+      } else if (JSON.stringify(old) !== JSON.stringify(cfg)) {
+        changed.push(id);
+        this.invalidateConnector(id);
+        this.configs.set(id, cfg);
+      }
+    }
+
+    return { added, removed, changed };
   }
 
   async connectEager(): Promise<void> {

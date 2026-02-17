@@ -15,10 +15,7 @@ interface SessionEntry {
   lastAccessedAt: number;
 }
 
-export async function startHttpTransport(
-  config: AppConfig,
-  transportConfig: HttpTransportConfig,
-) {
+export async function startHttpTransport(config: AppConfig, transportConfig: HttpTransportConfig) {
   const logger = getLogger();
   const manager = createConnectorManager(config);
   await manager.connectEager();
@@ -42,13 +39,15 @@ export async function startHttpTransport(
     });
   }
 
+  let cleanupInterval: ReturnType<typeof setInterval> | undefined;
+
   if (transportConfig.stateless) {
     setupStatelessRoutes(app, manager, config);
   } else {
     setupStatefulRoutes(app, manager, config, sessions);
 
     const sessionTimeout = transportConfig.sessionTimeout;
-    const cleanupInterval = setInterval(() => {
+    cleanupInterval = setInterval(() => {
       const now = Date.now();
       for (const [sid, entry] of sessions) {
         if (now - entry.lastAccessedAt > sessionTimeout) {
@@ -74,7 +73,7 @@ export async function startHttpTransport(
   logger.info(`Health check: http://${host}:${port}/health`);
   logger.info(`Mode: ${transportConfig.stateless ? "stateless" : "stateful (session-based)"}`);
 
-  return { httpServer, manager, sessions };
+  return { httpServer, manager, sessions, cleanupInterval };
 }
 
 function setupStatelessRoutes(

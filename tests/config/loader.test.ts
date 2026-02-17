@@ -51,11 +51,11 @@ describe("resolveEnvVariables", () => {
 
   it("throws on undefined env variable", () => {
     expect(() => resolveEnvVariables("${UNDEFINED_VAR}")).toThrow(
-      'Environment variable "UNDEFINED_VAR" is not defined'
+      'Environment variable "UNDEFINED_VAR" is not defined',
     );
   });
 
   it("throws with the original reference format", () => {
-    expect(() => resolveEnvVariables("${NOPE}")).toThrow('${NOPE}');
+    expect(() => resolveEnvVariables("${NOPE}")).toThrow("${NOPE}");
   });
 });

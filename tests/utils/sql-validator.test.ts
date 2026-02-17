@@ -116,7 +116,9 @@ describe("validateReadonlySql", () => {
     });
 
     it("blocks MERGE", () => {
-      const result = validateReadonlySql("MERGE INTO users USING source ON users.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name");
+      const result = validateReadonlySql(
+        "MERGE INTO users USING source ON users.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name",
+      );
       expect(result.valid).toBe(false);
       expect(result.error).toContain("MERGE");
     });

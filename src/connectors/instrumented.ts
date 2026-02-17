@@ -1,11 +1,4 @@
-import type {
-  Connector,
-  QueryResult,
-  TableInfo,
-  ColumnInfo,
-  ExplainResult,
-  TransactionHandle,
-} from "./interface.js";
+import type { Connector, QueryResult, TableInfo, ColumnInfo, ExplainResult, TransactionHandle } from "./interface.js";
 import type { PerformanceTracker } from "../tools/readonly/performance.js";
 
 export class InstrumentedConnector implements Connector {

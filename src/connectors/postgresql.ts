@@ -1,13 +1,7 @@
 import pg from "pg";
 import { randomUUID } from "node:crypto";
-import type {
-  Connector,
-  QueryResult,
-  TableInfo,
-  ColumnInfo,
-  ExplainResult,
-  TransactionHandle,
-} from "./interface.js";
+import { readFileSync } from "node:fs";
+import type { Connector, QueryResult, TableInfo, ColumnInfo, ExplainResult, TransactionHandle } from "./interface.js";
 import type { PostgresConfig } from "../config/types.js";
 
 export class PostgresConnector implements Connector {
@@ -24,17 +18,38 @@ export class PostgresConnector implements Connector {
   }
 
   async connect(): Promise<void> {
-    this.pool = new pg.Pool({
-      host: this.config.host,
-      port: this.config.port,
-      database: this.config.database,
-      user: this.config.user,
-      password: this.config.password,
-      ssl: this.config.ssl ? { rejectUnauthorized: this.config.sslRejectUnauthorized } : undefined,
-      max: 10,
-      statement_timeout: this.queryTimeout,
-      query_timeout: this.queryTimeout,
-    });
+    const sslConfig = this.config.ssl
+      ? {
+          rejectUnauthorized: this.config.sslRejectUnauthorized,
+          ...(this.config.sslCa && {
+            ca: this.config.sslCa.startsWith("-----BEGIN")
+              ? this.config.sslCa
+              : readFileSync(this.config.sslCa, "utf-8"),
+          }),
+        }
+      : undefined;
+
+    const poolOptions: pg.PoolConfig = this.config.connectionString
+      ? {
+          connectionString: this.config.connectionString,
+          ssl: sslConfig,
+          max: 10,
+          statement_timeout: this.queryTimeout,
+          query_timeout: this.queryTimeout,
+        }
+      : {
+          host: this.config.host,
+          port: this.config.port,
+          database: this.config.database,
+          user: this.config.user,
+          password: this.config.password,
+          ssl: sslConfig,
+          max: 10,
+          statement_timeout: this.queryTimeout,
+          query_timeout: this.queryTimeout,
+        };
+
+    this.pool = new pg.Pool(poolOptions);
     // Verify connection
     const client = await this.pool.connect();
     client.release();
@@ -71,7 +86,7 @@ export class PostgresConnector implements Connector {
        FROM information_schema.tables
        WHERE table_schema = $1
        ORDER BY table_name`,
-      [s]
+      [s],
     );
     return result.rows.map((r: Record<string, unknown>) => ({
       schema: r.table_schema as string,
@@ -102,7 +117,7 @@ export class PostgresConnector implements Connector {
        ) pk ON c.column_name = pk.column_name
        WHERE c.table_name = $1 AND c.table_schema = $2
        ORDER BY c.ordinal_position`,
-      [table, s]
+      [table, s],
     );
     return result.rows.map((r: Record<string, unknown>) => ({
       name: r.column_name as string,
@@ -120,7 +135,7 @@ export class PostgresConnector implements Connector {
        FROM information_schema.columns
        WHERE table_schema = $1
        ORDER BY table_name, ordinal_position`,
-      [s]
+      [s],
     );
     const tables = new Map<string, string[]>();
     for (const row of result.rows) {

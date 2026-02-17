@@ -24,18 +24,30 @@
       "database": "myapp",
       "user": "admin",
       "password": "secret123",
-      "description": "Main PostgreSQL",
+      "ssl": true,
+      "sslCa": "/path/to/ca-certificate.pem",
+      "description": "Main PostgreSQL (host-based)",
       "lazyConnection": true,
       "maxRows": 200
     },
     {
+      "id": "main_pg_connstr",
+      "type": "postgresql",
+      "connectionString": "postgresql://admin:secret123@localhost:5432/myapp?sslmode=require",
+      "description": "Main PostgreSQL (connection string)"
+    },
+    {
       "id": "analytics",
       "type": "clickhouse",
-      "url": "http://localhost:8123",
+      "url": "https://localhost:8443",
       "database": "analytics",
       "user": "default",
       "password": "",
-      "description": "ClickHouse analytics"
+      "tls": {
+        "ca": "/path/to/ca-certificate.pem",
+        "rejectUnauthorized": true
+      },
+      "description": "ClickHouse analytics with TLS"
     }
   ]
 }

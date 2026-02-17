@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ConnectorManager } from "../connectors/manager.js";
 import type { Defaults } from "../config/types.js";
 
@@ -12,11 +12,7 @@ import { createPerformanceParams, performanceHandler } from "./readonly/performa
 import { createExecuteParams, executeHandler } from "./write/execute.js";
 import { createTransactionParams, transactionHandler } from "./write/transaction.js";
 
-export function registerTools(
-  server: McpServer,
-  manager: ConnectorManager,
-  defaults: Defaults,
-) {
+export function registerTools(server: McpServer, manager: ConnectorManager, defaults: Defaults) {
   const dbIds = manager.getDatabaseIds();
 
   if (defaults.toolsPerDatabase) {
@@ -26,11 +22,7 @@ export function registerTools(
   }
 }
 
-function registerParameterTools(
-  server: McpServer,
-  manager: ConnectorManager,
-  dbIds: string[],
-) {
+function registerParameterTools(server: McpServer, manager: ConnectorManager, dbIds: string[]) {
   server.tool(
     "query",
     `Execute a read-only SQL query. Available databases: ${dbIds.join(", ")}`,
@@ -38,12 +30,7 @@ function registerParameterTools(
     queryToolHandler(manager),
   );
 
-  server.tool(
-    "list_databases",
-    "List all configured databases",
-    {},
-    listDatabasesHandler(manager),
-  );
+  server.tool("list_databases", "List all configured databases", {}, listDatabasesHandler(manager));
 
   server.tool(
     "list_tables",
@@ -95,11 +82,7 @@ function registerParameterTools(
   );
 }
 
-function registerPerDatabaseTools(
-  server: McpServer,
-  manager: ConnectorManager,
-  dbIds: string[],
-) {
+function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, dbIds: string[]) {
   for (const dbId of dbIds) {
     const singleDbIds = [dbId];
     const config = manager.getConfig(dbId)!;
@@ -172,10 +155,5 @@ function registerPerDatabaseTools(
   }
 
   // list_databases is always global
-  server.tool(
-    "list_databases",
-    "List all configured databases",
-    {},
-    listDatabasesHandler(manager),
-  );
+  server.tool("list_databases", "List all configured databases", {}, listDatabasesHandler(manager));
 }

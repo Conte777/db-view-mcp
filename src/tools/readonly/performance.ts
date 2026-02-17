@@ -21,9 +21,7 @@ export class PerformanceTracker {
   }
 
   getSlowQueries(database?: string, limit = 20): SlowQuery[] {
-    const filtered = database
-      ? this.slowQueries.filter((q) => q.database === database)
-      : this.slowQueries;
+    const filtered = database ? this.slowQueries.filter((q) => q.database === database) : this.slowQueries;
     return filtered.slice(-limit);
   }
 
@@ -51,12 +49,7 @@ export function createPerformanceParams(dbIds: string[]) {
 
 export function performanceHandler(manager: ConnectorManager) {
   const tracker = manager.getPerformanceTracker();
-  return async (params: {
-    database: string;
-    action: string;
-    threshold?: number;
-    limit?: number;
-  }) => {
+  return async (params: { database: string; action: string; threshold?: number; limit?: number }) => {
     try {
       switch (params.action) {
         case "getSlowQueries":

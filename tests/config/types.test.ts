@@ -3,9 +3,7 @@ import { AppConfigSchema, resolveDbConfig, type DatabaseConfig, type Defaults } 
 
 describe("AppConfigSchema", () => {
   const minimalConfig = {
-    databases: [
-      { id: "test", type: "postgresql", host: "localhost", database: "testdb", user: "user" },
-    ],
+    databases: [{ id: "test", type: "postgresql", host: "localhost", database: "testdb", user: "user" }],
   };
 
   it("parses minimal config with defaults", () => {
@@ -47,17 +45,89 @@ describe("AppConfigSchema", () => {
     expect(() =>
       AppConfigSchema.parse({
         databases: [{ id: "x", type: "mysql", host: "h", database: "d", user: "u" }],
-      })
+      }),
     ).toThrow();
   });
 
   it("parses clickhouse config", () => {
     const result = AppConfigSchema.parse({
-      databases: [
-        { id: "ch", type: "clickhouse", url: "http://localhost:8123", database: "default" },
-      ],
+      databases: [{ id: "ch", type: "clickhouse", url: "http://localhost:8123", database: "default" }],
     });
     expect(result.databases[0].type).toBe("clickhouse");
+  });
+
+  it("parses postgresql config with sslCa", () => {
+    const result = AppConfigSchema.parse({
+      databases: [
+        {
+          id: "pg",
+          type: "postgresql",
+          host: "localhost",
+          database: "testdb",
+          user: "user",
+          ssl: true,
+          sslCa: "/path/to/ca.pem",
+        },
+      ],
+    });
+    const db = result.databases[0];
+    expect(db.type).toBe("postgresql");
+    if (db.type === "postgresql") {
+      expect(db.sslCa).toBe("/path/to/ca.pem");
+    }
+  });
+
+  it("parses clickhouse config with tls", () => {
+    const result = AppConfigSchema.parse({
+      databases: [
+        {
+          id: "ch",
+          type: "clickhouse",
+          url: "https://localhost:8443",
+          database: "default",
+          tls: { ca: "/path/to/ca.pem", rejectUnauthorized: false },
+        },
+      ],
+    });
+    const db = result.databases[0];
+    expect(db.type).toBe("clickhouse");
+    if (db.type === "clickhouse") {
+      expect(db.tls?.ca).toBe("/path/to/ca.pem");
+      expect(db.tls?.rejectUnauthorized).toBe(false);
+    }
+  });
+
+  it("parses postgresql with connectionString", () => {
+    const result = AppConfigSchema.parse({
+      databases: [
+        {
+          id: "pg",
+          type: "postgresql",
+          connectionString: "postgresql://user:pass@localhost:5432/mydb",
+        },
+      ],
+    });
+    const db = result.databases[0];
+    expect(db.type).toBe("postgresql");
+    if (db.type === "postgresql") {
+      expect(db.connectionString).toBe("postgresql://user:pass@localhost:5432/mydb");
+    }
+  });
+
+  it("rejects postgresql without connectionString and without host+database+user", () => {
+    expect(() =>
+      AppConfigSchema.parse({
+        databases: [{ id: "pg", type: "postgresql" }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects postgresql with only host (missing database and user)", () => {
+    expect(() =>
+      AppConfigSchema.parse({
+        databases: [{ id: "pg", type: "postgresql", host: "localhost" }],
+      }),
+    ).toThrow();
   });
 });
 
