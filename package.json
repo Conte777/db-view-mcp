@@ -1,0 +1,39 @@
+{
+  "name": "@conte777/db-view-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for database access (PostgreSQL + ClickHouse)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "db-view-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "config.example.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "database",
+    "postgresql",
+    "clickhouse"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@clickhouse/client": "^1.17.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "pg": "^8.18.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "@types/pg": "^8.16.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

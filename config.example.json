@@ -1,0 +1,31 @@
+{
+  "defaults": {
+    "maxRows": 100,
+    "lazyConnection": true,
+    "toolsPerDatabase": false,
+    "queryTimeout": 30000
+  },
+  "databases": [
+    {
+      "id": "main_pg",
+      "type": "postgresql",
+      "host": "localhost",
+      "port": 5432,
+      "database": "myapp",
+      "user": "admin",
+      "password": "secret123",
+      "description": "Main PostgreSQL",
+      "lazyConnection": true,
+      "maxRows": 200
+    },
+    {
+      "id": "analytics",
+      "type": "clickhouse",
+      "url": "http://localhost:8123",
+      "database": "analytics",
+      "user": "default",
+      "password": "",
+      "description": "ClickHouse analytics"
+    }
+  ]
+}
