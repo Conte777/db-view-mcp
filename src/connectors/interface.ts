@@ -39,9 +39,9 @@ export interface Connector {
 
   listTables(schema?: string): Promise<TableInfo[]>;
   describeTable(table: string, schema?: string): Promise<ColumnInfo[]>;
-  getSchema(): Promise<string>;
+  getSchema(schema?: string): Promise<string>;
 
-  explain(sql: string): Promise<ExplainResult>;
+  explain(sql: string, analyze?: boolean): Promise<ExplainResult>;
 
   beginTransaction(): Promise<TransactionHandle>;
 }

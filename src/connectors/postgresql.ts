@@ -30,8 +30,10 @@ export class PostgresConnector implements Connector {
       database: this.config.database,
       user: this.config.user,
       password: this.config.password,
-      ssl: this.config.ssl ? { rejectUnauthorized: false } : undefined,
+      ssl: this.config.ssl ? { rejectUnauthorized: this.config.sslRejectUnauthorized } : undefined,
       max: 10,
+      statement_timeout: this.queryTimeout,
+      query_timeout: this.queryTimeout,
     });
     // Verify connection
     const client = await this.pool.connect();
@@ -111,12 +113,14 @@ export class PostgresConnector implements Connector {
     }));
   }
 
-  async getSchema(): Promise<string> {
+  async getSchema(schema?: string): Promise<string> {
+    const s = schema ?? "public";
     const result = await this.getPool().query(
       `SELECT table_name, column_name, data_type, is_nullable, column_default
        FROM information_schema.columns
-       WHERE table_schema = 'public'
-       ORDER BY table_name, ordinal_position`
+       WHERE table_schema = $1
+       ORDER BY table_name, ordinal_position`,
+      [s]
     );
     const tables = new Map<string, string[]>();
     for (const row of result.rows) {
@@ -135,15 +139,21 @@ export class PostgresConnector implements Connector {
     return lines.join("\n");
   }
 
-  async explain(sql: string): Promise<ExplainResult> {
-    const result = await this.getPool().query(`EXPLAIN ANALYZE ${sql}`);
+  async explain(sql: string, analyze = false): Promise<ExplainResult> {
+    const prefix = analyze ? "EXPLAIN ANALYZE" : "EXPLAIN";
+    const result = await this.getPool().query(`${prefix} ${sql}`);
     const plan = result.rows.map((r: Record<string, unknown>) => r["QUERY PLAN"]).join("\n");
     return { plan };
   }
 
   async beginTransaction(): Promise<TransactionHandle> {
     const client = await this.getPool().connect();
-    await client.query("BEGIN");
+    try {
+      await client.query("BEGIN");
+    } catch (err) {
+      client.release();
+      throw err;
+    }
     const id = randomUUID();
     return {
       id,
@@ -152,12 +162,18 @@ export class PostgresConnector implements Connector {
         return { rows: result.rows ?? [], rowCount: result.rowCount ?? 0 };
       },
       async commit(): Promise<void> {
-        await client.query("COMMIT");
-        client.release();
+        try {
+          await client.query("COMMIT");
+        } finally {
+          client.release();
+        }
       },
       async rollback(): Promise<void> {
-        await client.query("ROLLBACK");
-        client.release();
+        try {
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
       },
     };
   }

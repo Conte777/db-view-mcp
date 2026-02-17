@@ -9,6 +9,7 @@ const PostgresConfigSchema = z.object({
   user: z.string(),
   password: z.string().default(""),
   ssl: z.boolean().optional(),
+  sslRejectUnauthorized: z.boolean().default(true),
   description: z.string().optional(),
   lazyConnection: z.boolean().optional(),
   maxRows: z.number().optional(),
@@ -33,11 +34,14 @@ const DatabaseConfigSchema = z.discriminatedUnion("type", [
   ClickHouseConfigSchema,
 ]);
 
+const LogLevelSchema = z.enum(["debug", "info", "warn", "error"]);
+
 const DefaultsSchema = z.object({
   maxRows: z.number().default(100),
   lazyConnection: z.boolean().default(true),
   toolsPerDatabase: z.boolean().default(false),
   queryTimeout: z.number().default(30000),
+  logLevel: LogLevelSchema.default("info"),
 });
 
 const HttpTransportConfigSchema = z.object({
@@ -45,6 +49,7 @@ const HttpTransportConfigSchema = z.object({
   port: z.number().default(3000),
   host: z.string().default("127.0.0.1"),
   stateless: z.boolean().default(false),
+  sessionTimeout: z.number().default(30 * 60 * 1000), // 30 minutes
   auth: z.object({
     type: z.literal("bearer"),
     token: z.string(),
@@ -67,6 +72,7 @@ export const AppConfigSchema = z.object({
     lazyConnection: true,
     toolsPerDatabase: false,
     queryTimeout: 30000,
+    logLevel: "info" as const,
   }),
   databases: z.array(DatabaseConfigSchema).min(1),
 });

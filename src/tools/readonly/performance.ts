@@ -9,7 +9,7 @@ interface SlowQuery {
   database: string;
 }
 
-class PerformanceTracker {
+export class PerformanceTracker {
   private slowQueries: SlowQuery[] = [];
   private threshold = 1000; // ms
 
@@ -40,8 +40,6 @@ class PerformanceTracker {
   }
 }
 
-export const performanceTracker = new PerformanceTracker();
-
 export function createPerformanceParams(dbIds: string[]) {
   return {
     database: z.enum(dbIds as [string, ...string[]]).describe(`Database ID. Available: ${dbIds.join(", ")}`),
@@ -52,6 +50,7 @@ export function createPerformanceParams(dbIds: string[]) {
 }
 
 export function performanceHandler(manager: ConnectorManager) {
+  const tracker = manager.getPerformanceTracker();
   return async (params: {
     database: string;
     action: string;
@@ -62,23 +61,23 @@ export function performanceHandler(manager: ConnectorManager) {
       switch (params.action) {
         case "getSlowQueries":
           return formatSuccess({
-            data: performanceTracker.getSlowQueries(params.database, params.limit),
+            data: tracker.getSlowQueries(params.database, params.limit),
             database: params.database,
           });
         case "getMetrics":
           return formatSuccess({
             data: {
-              slowQueryThreshold: performanceTracker.getThreshold(),
+              slowQueryThreshold: tracker.getThreshold(),
               connectedDatabases: manager.getDatabaseIds(),
             },
             database: params.database,
           });
         case "reset":
-          performanceTracker.reset();
+          tracker.reset();
           return formatSuccess({ data: "Performance metrics reset" });
         case "setThreshold":
           if (!params.threshold) return formatError("threshold is required for setThreshold");
-          performanceTracker.setThreshold(params.threshold);
+          tracker.setThreshold(params.threshold);
           return formatSuccess({ data: `Threshold set to ${params.threshold}ms` });
         default:
           return formatError(`Unknown action: ${params.action}`);

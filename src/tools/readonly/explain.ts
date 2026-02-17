@@ -7,18 +7,19 @@ export function createExplainParams(dbIds: string[]) {
   return {
     database: z.enum(dbIds as [string, ...string[]]).describe(`Database ID. Available: ${dbIds.join(", ")}`),
     sql: z.string().describe("SQL query to explain"),
+    analyze: z.boolean().optional().describe("Run EXPLAIN ANALYZE (actually executes the query). Default: false"),
   };
 }
 
 export function explainHandler(manager: ConnectorManager) {
-  return async (params: { database: string; sql: string }) => {
+  return async (params: { database: string; sql: string; analyze?: boolean }) => {
     const validation = validateReadonlySql(params.sql);
     if (!validation.valid) {
       return formatError(validation.error!, "READONLY_VIOLATION");
     }
     try {
       const connector = await manager.getConnector(params.database);
-      const result = await connector.explain(params.sql);
+      const result = await connector.explain(params.sql, params.analyze ?? false);
       return formatSuccess({ data: result.plan, database: params.database });
     } catch (err) {
       return formatError(String(err));

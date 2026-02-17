@@ -96,7 +96,7 @@ export class ClickHouseConnector implements Connector {
     }));
   }
 
-  async getSchema(): Promise<string> {
+  async getSchema(_schema?: string): Promise<string> {
     const result = await this.getClient().query({
       query: `SELECT name, create_table_query FROM system.tables WHERE database = currentDatabase()`,
       format: "JSONEachRow",
@@ -105,9 +105,10 @@ export class ClickHouseConnector implements Connector {
     return rows.map((r) => r.create_table_query).join(";\n\n");
   }
 
-  async explain(sql: string): Promise<ExplainResult> {
+  async explain(sql: string, analyze = false): Promise<ExplainResult> {
+    const prefix = analyze ? "EXPLAIN ANALYZE" : "EXPLAIN";
     const result = await this.getClient().query({
-      query: `EXPLAIN ${sql}`,
+      query: `${prefix} ${sql}`,
       format: "JSONEachRow",
     });
     const rows = (await result.json()) as { explain: string }[];

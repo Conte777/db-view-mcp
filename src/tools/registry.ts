@@ -129,14 +129,14 @@ function registerPerDatabaseTools(
     server.tool(
       `schema_${dbId}`,
       `Get full schema of ${dbId}${desc}`,
-      {},
-      async () => schemaHandler(manager)({ database: dbId }),
+      { schema: createSchemaParams(singleDbIds).schema },
+      async (params) => schemaHandler(manager)({ database: dbId, ...params }),
     );
 
     server.tool(
       `explain_query_${dbId}`,
       `Run EXPLAIN on ${dbId}${desc}`,
-      { sql: createExplainParams(singleDbIds).sql },
+      { sql: createExplainParams(singleDbIds).sql, analyze: createExplainParams(singleDbIds).analyze },
       async (params) => explainHandler(manager)({ database: dbId, ...params }),
     );
 

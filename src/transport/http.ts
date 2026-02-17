@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Server } from "node:http";
 import type { Request, Response, NextFunction } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -7,16 +7,19 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createConnectorManager, createMcpServerInstance } from "../server.js";
 import type { ConnectorManager } from "../connectors/manager.js";
 import type { AppConfig, HttpTransportConfig } from "../config/types.js";
+import { getLogger } from "../utils/logger.js";
 
 interface SessionEntry {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
+  lastAccessedAt: number;
 }
 
 export async function startHttpTransport(
   config: AppConfig,
   transportConfig: HttpTransportConfig,
 ) {
+  const logger = getLogger();
   const manager = createConnectorManager(config);
   await manager.connectEager();
 
@@ -26,10 +29,12 @@ export async function startHttpTransport(
   const app = createMcpExpressApp({ host });
 
   if (transportConfig.auth) {
-    const expectedToken = transportConfig.auth.token;
+    const expectedValue = `Bearer ${transportConfig.auth.token}`;
+    const expectedBuf = Buffer.from(expectedValue);
     app.use("/mcp", (req: Request, res: Response, next: NextFunction) => {
-      const authHeader = req.headers.authorization;
-      if (!authHeader || authHeader !== `Bearer ${expectedToken}`) {
+      const authHeader = req.headers.authorization ?? "";
+      const actualBuf = Buffer.from(authHeader);
+      if (actualBuf.length !== expectedBuf.length || !timingSafeEqual(actualBuf, expectedBuf)) {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
@@ -41,6 +46,20 @@ export async function startHttpTransport(
     setupStatelessRoutes(app, manager, config);
   } else {
     setupStatefulRoutes(app, manager, config, sessions);
+
+    const sessionTimeout = transportConfig.sessionTimeout;
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [sid, entry] of sessions) {
+        if (now - entry.lastAccessedAt > sessionTimeout) {
+          logger.info("Cleaning up expired session", { sessionId: sid });
+          entry.transport.close().catch(() => {});
+          entry.server.close().catch(() => {});
+          sessions.delete(sid);
+        }
+      }
+    }, 60_000);
+    cleanupInterval.unref();
   }
 
   setupHealthEndpoint(app, manager, sessions);
@@ -51,13 +70,9 @@ export async function startHttpTransport(
     });
   });
 
-  console.error(`db-view-mcp HTTP server listening on http://${host}:${port}/mcp`);
-  console.error(`Health check: http://${host}:${port}/health`);
-  if (transportConfig.stateless) {
-    console.error("Mode: stateless");
-  } else {
-    console.error("Mode: stateful (session-based)");
-  }
+  logger.info(`HTTP server listening on http://${host}:${port}/mcp`);
+  logger.info(`Health check: http://${host}:${port}/health`);
+  logger.info(`Mode: ${transportConfig.stateless ? "stateless" : "stateful (session-based)"}`);
 
   return { httpServer, manager, sessions };
 }
@@ -94,6 +109,7 @@ function setupStatefulRoutes(
 
     if (sessionId && sessions.has(sessionId)) {
       const session = sessions.get(sessionId)!;
+      session.lastAccessedAt = Date.now();
       await session.transport.handleRequest(req, res, req.body);
       return;
     }
@@ -108,7 +124,7 @@ function setupStatefulRoutes(
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (newSessionId) => {
-        sessions.set(newSessionId, { transport, server });
+        sessions.set(newSessionId, { transport, server, lastAccessedAt: Date.now() });
       },
     });
 
