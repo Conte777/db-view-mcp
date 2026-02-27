@@ -34,7 +34,6 @@ export class PostgresConnector implements Connector {
           connectionString: this.config.connectionString,
           ssl: sslConfig,
           max: 10,
-          statement_timeout: this.queryTimeout,
           query_timeout: this.queryTimeout,
         }
       : {
@@ -45,7 +44,6 @@ export class PostgresConnector implements Connector {
           password: this.config.password,
           ssl: sslConfig,
           max: 10,
-          statement_timeout: this.queryTimeout,
           query_timeout: this.queryTimeout,
         };
 
