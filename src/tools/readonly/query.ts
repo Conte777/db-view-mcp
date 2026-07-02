@@ -2,10 +2,11 @@ import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
 import { formatRows, formatError } from "../../utils/response.js";
 import { validateReadonlySql } from "../../utils/sql-validator.js";
+import { resolveDbId } from "../../utils/resolve-db.js";
 
 export function createQueryToolParams(dbIds: string[]) {
   return {
-    database: z.enum(dbIds as [string, ...string[]]).describe(`Database ID. Available: ${dbIds.join(", ")}`),
+    database: z.string().describe(`Database ID. Available: ${dbIds.join(", ")}`),
     sql: z.string().describe("SELECT query to execute"),
     maxRows: z.number().optional().describe("Maximum number of rows to return"),
   };
@@ -18,9 +19,10 @@ export function queryToolHandler(manager: ConnectorManager) {
       return formatError(validation.error!, "READONLY_VIOLATION");
     }
     try {
-      const connector = await manager.getConnector(params.database);
+      const database = resolveDbId(manager.getDatabaseIds(), params.database);
+      const connector = await manager.getConnector(database);
       const result = await connector.query(params.sql, undefined, params.maxRows);
-      return formatRows(result.rows, params.database);
+      return formatRows(result.rows, database);
     } catch (err) {
       return formatError(String(err));
     }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
 import type { TransactionHandle } from "../../connectors/interface.js";
 import { formatSuccess, formatError } from "../../utils/response.js";
+import { resolveDbId } from "../../utils/resolve-db.js";
 import { getLogger } from "../../utils/logger.js";
 
 const DEFAULT_TX_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -75,7 +76,7 @@ export const transactionStore = new TransactionStore();
 
 export function createTransactionParams(dbIds: string[]) {
   return {
-    database: z.enum(dbIds as [string, ...string[]]).describe(`Database ID. Available: ${dbIds.join(", ")}`),
+    database: z.string().describe(`Database ID. Available: ${dbIds.join(", ")}`),
     action: z.enum(["begin", "commit", "rollback", "execute"]).describe("Transaction action"),
     transactionId: z.string().optional().describe("Transaction ID (required for commit, rollback, execute)"),
     statement: z.string().optional().describe("SQL statement (required for execute)"),
@@ -94,12 +95,13 @@ export function transactionHandler(manager: ConnectorManager) {
     try {
       switch (params.action) {
         case "begin": {
-          const connector = await manager.getConnector(params.database);
+          const database = resolveDbId(manager.getDatabaseIds(), params.database);
+          const connector = await manager.getConnector(database);
           const tx = await connector.beginTransaction();
-          transactionStore.add(tx, params.database);
+          transactionStore.add(tx, database);
           return formatSuccess({
             data: { transactionId: tx.id, message: "Transaction started" },
-            database: params.database,
+            database,
           });
         }
 

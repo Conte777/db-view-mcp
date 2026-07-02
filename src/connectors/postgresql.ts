@@ -67,7 +67,8 @@ export class PostgresConnector implements Connector {
 
   async query(sql: string, params?: string[], maxRows?: number): Promise<QueryResult> {
     const limit = maxRows ?? this.maxRows;
-    const wrappedSql = `SELECT * FROM (${sql}) AS _q LIMIT ${limit}`;
+    // trailing ";" inside the subselect wrapper is a syntax error
+    const wrappedSql = `SELECT * FROM (${sql.trim().replace(/;+\s*$/, "")}) AS _q LIMIT ${limit}`;
     const result = await this.getPool().query(wrappedSql, params);
     return { rows: result.rows, rowCount: result.rows.length };
   }

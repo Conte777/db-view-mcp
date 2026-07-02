@@ -2,10 +2,11 @@ import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
 import { formatSuccess, formatError } from "../../utils/response.js";
 import { validateReadonlySql } from "../../utils/sql-validator.js";
+import { resolveDbId } from "../../utils/resolve-db.js";
 
 export function createExplainParams(dbIds: string[]) {
   return {
-    database: z.enum(dbIds as [string, ...string[]]).describe(`Database ID. Available: ${dbIds.join(", ")}`),
+    database: z.string().describe(`Database ID. Available: ${dbIds.join(", ")}`),
     sql: z.string().describe("SQL query to explain"),
     analyze: z.boolean().optional().describe("Run EXPLAIN ANALYZE (actually executes the query). Default: false"),
   };
@@ -18,9 +19,10 @@ export function explainHandler(manager: ConnectorManager) {
       return formatError(validation.error!, "READONLY_VIOLATION");
     }
     try {
-      const connector = await manager.getConnector(params.database);
+      const database = resolveDbId(manager.getDatabaseIds(), params.database);
+      const connector = await manager.getConnector(database);
       const result = await connector.explain(params.sql, params.analyze ?? false);
-      return formatSuccess({ data: result.plan, database: params.database });
+      return formatSuccess({ data: result.plan, database });
     } catch (err) {
       return formatError(String(err));
     }

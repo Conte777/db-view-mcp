@@ -51,7 +51,8 @@ export class ClickHouseConnector implements Connector {
 
   async query(sql: string, _params?: string[], maxRows?: number): Promise<QueryResult> {
     const limit = maxRows ?? this.maxRows;
-    const wrappedSql = `SELECT * FROM (${sql}) AS _q LIMIT ${limit}`;
+    // trailing ";" inside the subselect wrapper is a syntax error
+    const wrappedSql = `SELECT * FROM (${sql.trim().replace(/;+\s*$/, "")}) AS _q LIMIT ${limit}`;
     const result = await this.getClient().query({ query: wrappedSql, format: "JSONEachRow" });
     const rows = (await result.json()) as Record<string, unknown>[];
     return { rows, rowCount: rows.length };

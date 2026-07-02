@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
 import { formatSuccess, formatError } from "../../utils/response.js";
+import { resolveDbId } from "../../utils/resolve-db.js";
 
 interface SlowQuery {
   sql: string;
@@ -40,7 +41,7 @@ export class PerformanceTracker {
 
 export function createPerformanceParams(dbIds: string[]) {
   return {
-    database: z.enum(dbIds as [string, ...string[]]).describe(`Database ID. Available: ${dbIds.join(", ")}`),
+    database: z.string().describe(`Database ID. Available: ${dbIds.join(", ")}`),
     action: z.enum(["getSlowQueries", "getMetrics", "reset", "setThreshold"]).describe("Performance action"),
     threshold: z.number().optional().describe("Slow query threshold in ms (for setThreshold)"),
     limit: z.number().optional().describe("Max results (for getSlowQueries)"),
@@ -51,11 +52,12 @@ export function performanceHandler(manager: ConnectorManager) {
   const tracker = manager.getPerformanceTracker();
   return async (params: { database: string; action: string; threshold?: number; limit?: number }) => {
     try {
+      const database = resolveDbId(manager.getDatabaseIds(), params.database);
       switch (params.action) {
         case "getSlowQueries":
           return formatSuccess({
-            data: tracker.getSlowQueries(params.database, params.limit),
-            database: params.database,
+            data: tracker.getSlowQueries(database, params.limit),
+            database,
           });
         case "getMetrics":
           return formatSuccess({
@@ -63,7 +65,7 @@ export function performanceHandler(manager: ConnectorManager) {
               slowQueryThreshold: tracker.getThreshold(),
               connectedDatabases: manager.getDatabaseIds(),
             },
-            database: params.database,
+            database,
           });
         case "reset":
           tracker.reset();
