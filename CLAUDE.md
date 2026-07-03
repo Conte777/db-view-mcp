@@ -17,6 +17,16 @@ All runtime commands **require** a `--config <path>` arg or they throw:
 
 CI runs build → lint → `format:check` → `tsc --noEmit` → `test:coverage`. Lefthook pre-commit already runs biome + tsc on staged `*.ts`.
 
+## Releasing (npm, OIDC — no tokens)
+
+Version lives **only** in `package.json` (`src/server.ts` reads it at runtime). Release is a pushed git tag — no manual `npm publish`, no `NPM_TOKEN`:
+
+1. Bump `version` in `package.json` via a PR; merge to `main`.
+2. Tag the merge commit `vX.Y.Z` (must equal package.json) and push: `git tag v1.3.0 && git push origin v1.3.0`.
+3. `.github/workflows/publish.yml` fires on `v*` tags and runs `npm publish --access public` over **OIDC Trusted Publishing** — provenance is automatic.
+
+Trusted publisher is configured on npmjs.com against repo `Conte777/db-view-mcp` + `publish.yml` (see `npm trust list @conte777/db-view-mcp`). Never re-introduce a long-lived token. Re-tagging an already-published version fails (npm rejects duplicates) — bump first. Historical releases `v1.0.0`–`v1.2.1` are tagged retroactively on pre-`publish.yml` commits, so those tags don't trigger the workflow.
+
 ## Style (Biome, differs from defaults)
 
 2-space indent, line width 120, double quotes, always semicolons, trailing commas everywhere. Non-null `!` allowed (`noNonNullAssertion` off). `${VAR}` string literals allowed (`noTemplateCurlyInString` off — needed for env substitution).
