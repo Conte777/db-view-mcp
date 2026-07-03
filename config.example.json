@@ -13,7 +13,8 @@
     "maxRows": 100,
     "lazyConnection": true,
     "toolsPerDatabase": false,
-    "queryTimeout": 30000
+    "queryTimeout": 30000,
+    "rowFormat": "json"
   },
   "databases": [
     {

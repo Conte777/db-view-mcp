@@ -1,18 +1,26 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Server } from "node:http";
-import type { Request, Response, NextFunction } from "express";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createConnectorManager, createMcpServerInstance } from "../server.js";
-import type { ConnectorManager } from "../connectors/manager.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { NextFunction, Request, Response } from "express";
 import type { AppConfig, HttpTransportConfig } from "../config/types.js";
+import type { ConnectorManager } from "../connectors/manager.js";
+import { createConnectorManager, createMcpServerInstance } from "../server.js";
 import { getLogger } from "../utils/logger.js";
 
 interface SessionEntry {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
   lastAccessedAt: number;
+}
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
+function isAuthorized(req: Request, expectedBuf: Buffer): boolean {
+  const authHeader = req.headers.authorization ?? "";
+  const actualBuf = Buffer.from(authHeader);
+  return actualBuf.length === expectedBuf.length && timingSafeEqual(actualBuf, expectedBuf);
 }
 
 export async function startHttpTransport(config: AppConfig, transportConfig: HttpTransportConfig) {
@@ -25,13 +33,20 @@ export async function startHttpTransport(config: AppConfig, transportConfig: Htt
   const { host, port } = transportConfig;
   const app = createMcpExpressApp({ host });
 
+  if (!LOOPBACK_HOSTS.has(host) && !transportConfig.auth) {
+    logger.warn(
+      `HTTP transport is bound to non-loopback host "${host}" with no auth configured — ` +
+        "the server is reachable from the network without authentication. " +
+        "Set transport.auth (bearer token) or bind to a loopback host.",
+    );
+  }
+
+  let authBuf: Buffer | undefined;
   if (transportConfig.auth) {
-    const expectedValue = `Bearer ${transportConfig.auth.token}`;
-    const expectedBuf = Buffer.from(expectedValue);
+    authBuf = Buffer.from(`Bearer ${transportConfig.auth.token}`);
+    const expectedBuf = authBuf;
     app.use("/mcp", (req: Request, res: Response, next: NextFunction) => {
-      const authHeader = req.headers.authorization ?? "";
-      const actualBuf = Buffer.from(authHeader);
-      if (actualBuf.length !== expectedBuf.length || !timingSafeEqual(actualBuf, expectedBuf)) {
+      if (!isAuthorized(req, expectedBuf)) {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
@@ -61,7 +76,7 @@ export async function startHttpTransport(config: AppConfig, transportConfig: Htt
     cleanupInterval.unref();
   }
 
-  setupHealthEndpoint(app, manager, sessions);
+  setupHealthEndpoint(app, manager, sessions, authBuf);
 
   const httpServer = await new Promise<Server>((resolve) => {
     const server = app.listen(port, host, () => {
@@ -143,8 +158,14 @@ function setupHealthEndpoint(
   app: ReturnType<typeof createMcpExpressApp>,
   manager: ConnectorManager,
   sessions: Map<string, SessionEntry>,
+  authBuf: Buffer | undefined,
 ) {
-  app.get("/health", (_req: Request, res: Response) => {
+  app.get("/health", (req: Request, res: Response) => {
+    if (authBuf && !isAuthorized(req, authBuf)) {
+      res.json({ status: "ok" });
+      return;
+    }
+
     res.json({
       status: "ok",
       activeSessions: sessions.size,

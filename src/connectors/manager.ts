@@ -1,27 +1,16 @@
-import type { Connector } from "./interface.js";
 import type { ResolvedDatabaseConfig } from "../config/types.js";
-import { PostgresConnector } from "./postgresql.js";
+import { PerformanceTracker } from "../tools/readonly/performance.js";
+import { resolveDbId } from "../utils/resolve-db.js";
 import { ClickHouseConnector } from "./clickhouse.js";
 import { InstrumentedConnector } from "./instrumented.js";
-import { PerformanceTracker } from "../tools/readonly/performance.js";
-import { getLogger } from "../utils/logger.js";
-
-const CONNECTION_ERROR_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT"]);
-
-function isConnectionError(err: unknown): boolean {
-  if (err instanceof Error) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code && CONNECTION_ERROR_CODES.has(code)) return true;
-    if (err.message.includes("Connection terminated")) return true;
-    if (err.message.includes("connection refused")) return true;
-  }
-  return false;
-}
+import type { Connector } from "./interface.js";
+import { PostgresConnector } from "./postgresql.js";
 
 export class ConnectorManager {
   private configs: Map<string, ResolvedDatabaseConfig> = new Map();
   private connectors: Map<string, Connector> = new Map();
   private rawConnectors: Map<string, Connector> = new Map();
+  private connecting: Map<string, Promise<Connector>> = new Map();
   private tracker = new PerformanceTracker();
 
   constructor(databases: ResolvedDatabaseConfig[]) {
@@ -50,32 +39,49 @@ export class ConnectorManager {
     const existing = this.connectors.get(dbId);
     if (existing) return existing;
 
+    const inFlight = this.connecting.get(dbId);
+    if (inFlight) return inFlight;
+
     const config = this.configs.get(dbId);
     if (!config) throw new Error(`Unknown database: ${dbId}`);
 
-    const raw = this.createConnector(config);
-    await raw.connect();
-    this.rawConnectors.set(dbId, raw);
+    // Store the connect promise before awaiting so concurrent callers hitting
+    // the same miss join this one instead of each creating their own pool.
+    const connectPromise = (async () => {
+      const raw = this.createConnector(config);
+      await raw.connect();
+      // A concurrent updateDatabases()/invalidateConnector() may have replaced or removed this
+      // db's config while we were connecting. Storing the connector now would pin the manager to
+      // superseded (e.g. rotated/revoked) credentials, so discard it and let the caller retry.
+      if (this.configs.get(dbId) !== config) {
+        await raw.disconnect().catch(() => {});
+        throw new Error(`Database "${dbId}" was reconfigured during connection; please retry`);
+      }
+      this.rawConnectors.set(dbId, raw);
 
-    const instrumented = new InstrumentedConnector(raw, this.tracker, dbId);
-    this.connectors.set(dbId, instrumented);
-    return instrumented;
+      const instrumented = new InstrumentedConnector(raw, this.tracker, dbId);
+      this.connectors.set(dbId, instrumented);
+      return instrumented;
+    })();
+
+    this.connecting.set(dbId, connectPromise);
+    try {
+      return await connectPromise;
+    } finally {
+      this.connecting.delete(dbId);
+    }
   }
 
-  async withConnector<T>(dbId: string, fn: (connector: Connector) => Promise<T>): Promise<T> {
-    const connector = await this.getConnector(dbId);
-    try {
-      return await fn(connector);
-    } catch (err) {
-      if (isConnectionError(err)) {
-        const logger = getLogger();
-        logger.warn("Connection error, retrying", { database: dbId, error: String(err) });
-        this.invalidateConnector(dbId);
-        const retryConnector = await this.getConnector(dbId);
-        return await fn(retryConnector);
-      }
-      throw err;
-    }
+  // Single source of truth for fuzzy id resolution. Handlers must go through this (or acquire())
+  // rather than calling resolveDbId directly, so id-resolution stays consistent everywhere.
+  resolveId(input: string): string {
+    return resolveDbId(this.getDatabaseIds(), input);
+  }
+
+  async acquire(input: string): Promise<{ id: string; connector: Connector }> {
+    const id = this.resolveId(input);
+    const connector = await this.getConnector(id);
+    return { id, connector };
   }
 
   invalidateConnector(dbId: string): void {

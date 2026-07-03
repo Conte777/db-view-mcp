@@ -138,6 +138,7 @@ describe("resolveDbConfig", () => {
     toolsPerDatabase: false,
     queryTimeout: 30000,
     logLevel: "info",
+    rowFormat: "json",
   };
 
   it("applies defaults when db config has no overrides", () => {

@@ -14,7 +14,7 @@ const PostgresConfigBaseSchema = z.object({
   sslCa: z.string().optional(),
   description: z.string().optional(),
   lazyConnection: z.boolean().optional(),
-  maxRows: z.number().optional(),
+  maxRows: z.number().int().positive().optional(),
   queryTimeout: z.number().optional(),
 });
 
@@ -42,7 +42,7 @@ const ClickHouseConfigSchema = z.object({
     .optional(),
   description: z.string().optional(),
   lazyConnection: z.boolean().optional(),
-  maxRows: z.number().optional(),
+  maxRows: z.number().int().positive().optional(),
   queryTimeout: z.number().optional(),
 });
 
@@ -51,11 +51,12 @@ const DatabaseConfigSchema = z.union([PostgresConfigSchema, ClickHouseConfigSche
 const LogLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 
 const DefaultsSchema = z.object({
-  maxRows: z.number().default(100),
+  maxRows: z.number().int().positive().default(100),
   lazyConnection: z.boolean().default(true),
   toolsPerDatabase: z.boolean().default(false),
   queryTimeout: z.number().default(30000),
   logLevel: LogLevelSchema.default("info"),
+  rowFormat: z.enum(["json", "table"]).default("json"),
 });
 
 const HttpTransportConfigSchema = z.object({
@@ -80,16 +81,7 @@ const TransportConfigSchema = z.discriminatedUnion("type", [StdioTransportConfig
 
 export const AppConfigSchema = z.object({
   transport: TransportConfigSchema.optional().default({ type: "stdio" }),
-  defaults: DefaultsSchema.optional().transform(
-    (v) =>
-      v ?? {
-        maxRows: 100,
-        lazyConnection: true,
-        toolsPerDatabase: false,
-        queryTimeout: 30000,
-        logLevel: "info" as const,
-      },
-  ),
+  defaults: DefaultsSchema.optional().transform((v) => v ?? DefaultsSchema.parse({})),
   databases: z.array(DatabaseConfigSchema).min(1),
 });
 

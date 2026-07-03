@@ -1,8 +1,9 @@
-import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { Connector, QueryResult, TableInfo, ColumnInfo, ExplainResult, TransactionHandle } from "./interface.js";
+import pg from "pg";
 import type { PostgresConfig } from "../config/types.js";
+import { wrapReadonlyQuery } from "../utils/sql-validator.js";
+import type { ColumnInfo, Connector, ExplainResult, QueryResult, TableInfo, TransactionHandle } from "./interface.js";
 
 export class PostgresConnector implements Connector {
   readonly type = "postgresql" as const;
@@ -35,6 +36,8 @@ export class PostgresConnector implements Connector {
           ssl: sslConfig,
           max: 10,
           query_timeout: this.queryTimeout,
+          // query_timeout only rejects client-side; statement_timeout makes the server cancel the query too
+          statement_timeout: this.queryTimeout,
         }
       : {
           host: this.config.host,
@@ -45,6 +48,7 @@ export class PostgresConnector implements Connector {
           ssl: sslConfig,
           max: 10,
           query_timeout: this.queryTimeout,
+          statement_timeout: this.queryTimeout,
         };
 
     this.pool = new pg.Pool(poolOptions);
@@ -67,10 +71,20 @@ export class PostgresConnector implements Connector {
 
   async query(sql: string, params?: string[], maxRows?: number): Promise<QueryResult> {
     const limit = maxRows ?? this.maxRows;
-    // trailing ";" inside the subselect wrapper is a syntax error
-    const wrappedSql = `SELECT * FROM (${sql.trim().replace(/;+\s*$/, "")}) AS _q LIMIT ${limit}`;
-    const result = await this.getPool().query(wrappedSql, params);
-    return { rows: result.rows, rowCount: result.rows.length };
+    const wrappedSql = wrapReadonlyQuery(sql, limit, "postgresql");
+    // READ ONLY blocks writes/temp-table tricks, but not pg_terminate_backend/pg_read_file — those are guarded by the sql-validator deny-list
+    const client = await this.getPool().connect();
+    try {
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      const result = await client.query(wrappedSql, params);
+      await client.query("COMMIT");
+      return { rows: result.rows, rowCount: result.rows.length };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async execute(sql: string, params?: string[]): Promise<QueryResult> {
@@ -155,9 +169,21 @@ export class PostgresConnector implements Connector {
 
   async explain(sql: string, analyze = false): Promise<ExplainResult> {
     const prefix = analyze ? "EXPLAIN ANALYZE" : "EXPLAIN";
-    const result = await this.getPool().query(`${prefix} ${sql}`);
-    const plan = result.rows.map((r: Record<string, unknown>) => r["QUERY PLAN"]).join("\n");
-    return { plan };
+    // EXPLAIN ANALYZE actually runs the statement, so mirror query()'s READ ONLY transaction as a
+    // DB-level backstop to the validator rather than executing directly on the pool.
+    const client = await this.getPool().connect();
+    try {
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      const result = await client.query(`${prefix} ${sql}`);
+      await client.query("COMMIT");
+      const plan = result.rows.map((r: Record<string, unknown>) => r["QUERY PLAN"]).join("\n");
+      return { plan };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async beginTransaction(): Promise<TransactionHandle> {
@@ -169,24 +195,40 @@ export class PostgresConnector implements Connector {
       throw err;
     }
     const id = randomUUID();
+    let released = false;
+    const releaseOnce = (err?: Error) => {
+      if (!released) {
+        released = true;
+        client.release(err);
+      }
+    };
     return {
       id,
       async execute(sql: string, params?: string[]): Promise<QueryResult> {
+        if (released) throw new Error("Transaction already finalized");
         const result = await client.query(sql, params);
         return { rows: result.rows ?? [], rowCount: result.rowCount ?? 0 };
       },
       async commit(): Promise<void> {
+        if (released) throw new Error("Transaction already finalized");
         try {
           await client.query("COMMIT");
-        } finally {
-          client.release();
+          releaseOnce();
+        } catch (err) {
+          // Hand the (possibly poisoned) connection back with the error so pg destroys it
+          // instead of returning a half-transactional client to the pool.
+          releaseOnce(err as Error);
+          throw err;
         }
       },
       async rollback(): Promise<void> {
+        if (released) throw new Error("Transaction already finalized");
         try {
           await client.query("ROLLBACK");
-        } finally {
-          client.release();
+          releaseOnce();
+        } catch (err) {
+          releaseOnce(err as Error);
+          throw err;
         }
       },
     };

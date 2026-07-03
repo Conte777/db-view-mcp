@@ -1,6 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ConnectorManager } from "../../src/connectors/manager.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedDatabaseConfig } from "../../src/config/types.js";
+import type { Connector } from "../../src/connectors/interface.js";
+import { ConnectorManager } from "../../src/connectors/manager.js";
+
+// Not an intersection with ConnectorManager: createConnector is private there,
+// and intersecting a private member reduces the type to never.
+type ManagerWithCreateConnector = {
+  createConnector: (config: ResolvedDatabaseConfig) => Connector;
+};
+
+function makeFakeConnector(overrides: Partial<Connector> = {}): Connector {
+  return {
+    type: "postgresql",
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    query: vi.fn(),
+    execute: vi.fn(),
+    listTables: vi.fn(),
+    describeTable: vi.fn(),
+    getSchema: vi.fn(),
+    explain: vi.fn(),
+    beginTransaction: vi.fn(),
+    ...overrides,
+  };
+}
 
 // We can't easily test real connectors, so we test config/lookup logic
 const mockConfigs: ResolvedDatabaseConfig[] = [
@@ -44,7 +67,8 @@ describe("ConnectorManager", () => {
   it("returns config by ID", () => {
     const config = manager.getConfig("test_pg");
     expect(config).toBeDefined();
-    expect(config!.host).toBe("localhost");
+    if (config?.type !== "postgresql") throw new Error("expected postgresql config");
+    expect(config.host).toBe("localhost");
   });
 
   it("returns undefined for unknown ID", () => {
@@ -68,9 +92,93 @@ describe("ConnectorManager", () => {
   it("invalidateConnector does not throw for non-connected db", () => {
     expect(() => manager.invalidateConnector("test_pg")).not.toThrow();
   });
+});
 
-  it("withConnector throws for unknown database", async () => {
-    await expect(manager.withConnector("unknown", async () => {})).rejects.toThrow("Unknown database: unknown");
+describe("ConnectorManager.getConnector concurrency (in-flight connect guard)", () => {
+  let manager: ConnectorManager;
+
+  beforeEach(() => {
+    manager = new ConnectorManager(mockConfigs);
+  });
+
+  it("joins concurrent callers onto a single connect and returns the same instance", async () => {
+    let resolveConnect!: () => void;
+    const connectGate = new Promise<void>((resolve) => {
+      resolveConnect = resolve;
+    });
+    const fakeConnector = makeFakeConnector({ connect: vi.fn().mockImplementation(() => connectGate) });
+    const createConnector = vi.fn(() => fakeConnector);
+    (manager as unknown as ManagerWithCreateConnector).createConnector = createConnector;
+
+    const p1 = manager.getConnector("test_pg");
+    const p2 = manager.getConnector("test_pg");
+
+    resolveConnect();
+    const [c1, c2] = await Promise.all([p1, p2]);
+
+    expect(createConnector).toHaveBeenCalledOnce();
+    expect(c1).toBe(c2);
+  });
+
+  it("clears the in-flight entry on a failed connect so the next call retries", async () => {
+    const failingConnector = makeFakeConnector({
+      connect: vi.fn().mockRejectedValue(new Error("connection refused")),
+    });
+    const succeedingConnector = makeFakeConnector();
+    const createConnector = vi.fn().mockReturnValueOnce(failingConnector).mockReturnValueOnce(succeedingConnector);
+    (manager as unknown as ManagerWithCreateConnector).createConnector = createConnector;
+
+    await expect(manager.getConnector("test_pg")).rejects.toThrow("connection refused");
+
+    const connector = await manager.getConnector("test_pg");
+    expect(connector).toBeDefined();
+    expect(createConnector).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards a connector whose config was replaced while its connect was in-flight", async () => {
+    let resolveConnect!: () => void;
+    const connectGate = new Promise<void>((resolve) => {
+      resolveConnect = resolve;
+    });
+    const stale = makeFakeConnector({ connect: vi.fn().mockImplementation(() => connectGate) });
+    const fresh = makeFakeConnector();
+    const createConnector = vi.fn().mockReturnValueOnce(stale).mockReturnValueOnce(fresh);
+    (manager as unknown as ManagerWithCreateConnector).createConnector = createConnector;
+
+    const pending = manager.getConnector("test_pg");
+    // Hot-reload swaps in a new config object for test_pg mid-connect.
+    manager.updateDatabases([{ ...mockConfigs[0], maxRows: 999 }, mockConfigs[1]]);
+    resolveConnect();
+
+    await expect(pending).rejects.toThrow(/reconfigured during connection/);
+    expect(stale.disconnect).toHaveBeenCalledOnce();
+
+    // The next call builds a brand-new connector from the updated config.
+    const connector = await manager.getConnector("test_pg");
+    expect(connector).toBeDefined();
+    expect(createConnector).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ConnectorManager.acquire", () => {
+  let manager: ConnectorManager;
+
+  beforeEach(() => {
+    manager = new ConnectorManager(mockConfigs);
+  });
+
+  it("resolves a fuzzy id and returns the connector for the resolved id", async () => {
+    const fakeConnector = makeFakeConnector();
+    (manager as unknown as ManagerWithCreateConnector).createConnector = vi.fn(() => fakeConnector);
+
+    const { id, connector } = await manager.acquire("TEST_PG");
+
+    expect(id).toBe("test_pg");
+    expect(connector).toBeDefined();
+  });
+
+  it("throws a DB_NOT_FOUND-coded error for an unknown id", async () => {
+    await expect(manager.acquire("unknown")).rejects.toMatchObject({ code: "DB_NOT_FOUND" });
   });
 });
 

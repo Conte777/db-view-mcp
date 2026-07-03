@@ -56,7 +56,7 @@ export class Logger {
       ...data,
     };
 
-    process.stderr.write(JSON.stringify(entry) + "\n");
+    process.stderr.write(`${JSON.stringify(entry)}\n`);
   }
 }
 

@@ -12,6 +12,9 @@ MCP (Model Context Protocol) server providing database access tools for AI assis
 npm run build          # TypeScript → dist/
 npm run dev            # Run with tsx (no build needed)
 npm run start          # Run compiled dist/index.js
+npm test               # Run vitest suite
+npm run lint           # Biome lint (src/ tests/)
+npm run format         # Biome format --write (src/ tests/)
 ```
 
 The server requires `--config <path>` CLI argument pointing to a JSON config file (see `config.example.json`). Optional `--transport stdio|http` overrides config.
@@ -49,4 +52,4 @@ The server requires `--config <path>` CLI argument pointing to a JSON config fil
 - `pg` for PostgreSQL, `@clickhouse/client` for ClickHouse
 - `zod` v4 for config and tool param validation
 - `express` v5 for HTTP transport
-- No test framework configured
+- `vitest` for tests, `biome` for lint/format, `lefthook` for git hooks

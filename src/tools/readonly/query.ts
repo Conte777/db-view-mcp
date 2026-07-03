@@ -1,14 +1,18 @@
 import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
-import { formatRows, formatError } from "../../utils/response.js";
+import { formatCaughtError, formatError, formatRows } from "../../utils/response.js";
 import { validateReadonlySql } from "../../utils/sql-validator.js";
-import { resolveDbId } from "../../utils/resolve-db.js";
 
 export function createQueryToolParams(dbIds: string[]) {
   return {
     database: z.string().describe(`Database ID. Available: ${dbIds.join(", ")}`),
     sql: z.string().describe("SELECT query to execute"),
-    maxRows: z.number().optional().describe("Maximum number of rows to return"),
+    maxRows: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Maximum number of rows to return. Can only lower the configured cap, not raise it."),
   };
 }
 
@@ -19,12 +23,13 @@ export function queryToolHandler(manager: ConnectorManager) {
       return formatError(validation.error!, "READONLY_VIOLATION");
     }
     try {
-      const database = resolveDbId(manager.getDatabaseIds(), params.database);
-      const connector = await manager.getConnector(database);
-      const result = await connector.query(params.sql, undefined, params.maxRows);
+      const { id: database, connector } = await manager.acquire(params.database);
+      const cap = manager.getConfig(database)!.maxRows;
+      const effective = Math.min(params.maxRows ?? cap, cap);
+      const result = await connector.query(validation.normalizedSql ?? params.sql, undefined, effective);
       return formatRows(result.rows, database);
     } catch (err) {
-      return formatError(String(err));
+      return formatCaughtError(err);
     }
   };
 }

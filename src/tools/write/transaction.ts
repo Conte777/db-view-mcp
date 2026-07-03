@@ -1,9 +1,9 @@
 import { z } from "zod";
-import type { ConnectorManager } from "../../connectors/manager.js";
 import type { TransactionHandle } from "../../connectors/interface.js";
-import { formatSuccess, formatError } from "../../utils/response.js";
-import { resolveDbId } from "../../utils/resolve-db.js";
+import type { ConnectorManager } from "../../connectors/manager.js";
 import { getLogger } from "../../utils/logger.js";
+import { formatCaughtError, formatError, formatSuccess } from "../../utils/response.js";
+import { capRows } from "./execute.js";
 
 const DEFAULT_TX_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -33,12 +33,20 @@ export class TransactionStore {
     return this.entries.get(id);
   }
 
-  remove(id: string): void {
+  // Synchronous claim: Map.delete happens with no `await` in between, so whichever
+  // caller (handler or TTL callback) reaches this first is the only one that gets
+  // to finalize the transaction. The old get()...await...delete() sequence let the
+  // TTL callback interleave during the await and finalize the same handle twice.
+  take(id: string): TransactionEntry | undefined {
     const entry = this.entries.get(id);
-    if (entry) {
-      clearTimeout(entry.timer);
-      this.entries.delete(id);
-    }
+    if (!entry) return undefined;
+    clearTimeout(entry.timer);
+    this.entries.delete(id);
+    return entry;
+  }
+
+  remove(id: string): void {
+    this.take(id);
   }
 
   async cleanupAll(): Promise<void> {
@@ -51,7 +59,7 @@ export class TransactionStore {
   }
 
   private async autoRollback(id: string): Promise<void> {
-    const entry = this.entries.get(id);
+    const entry = this.take(id);
     if (!entry) return;
     const logger = getLogger();
     try {
@@ -65,9 +73,6 @@ export class TransactionStore {
         transactionId: id,
         error: String(err),
       });
-    } finally {
-      clearTimeout(entry.timer);
-      this.entries.delete(id);
     }
   }
 }
@@ -95,8 +100,7 @@ export function transactionHandler(manager: ConnectorManager) {
     try {
       switch (params.action) {
         case "begin": {
-          const database = resolveDbId(manager.getDatabaseIds(), params.database);
-          const connector = await manager.getConnector(database);
+          const { id: database, connector } = await manager.acquire(params.database);
           const tx = await connector.beginTransaction();
           transactionStore.add(tx, database);
           return formatSuccess({
@@ -108,37 +112,41 @@ export function transactionHandler(manager: ConnectorManager) {
         case "execute": {
           if (!params.transactionId) return formatError("transactionId is required for execute");
           if (!params.statement) return formatError("statement is required for execute");
+          // Non-finalizing lookup: a tx claimed (and finalized) by commit/rollback/TTL
+          // concurrently will simply fail at the driver level with a clear error.
           const entry = transactionStore.get(params.transactionId);
           if (!entry) return formatError(`Transaction not found: ${params.transactionId}`, "TX_NOT_FOUND");
           const result = await entry.handle.execute(params.statement, params.params);
+          const maxRows = manager.getConfig(entry.database)!.maxRows;
+          const { rows, truncated } = capRows(result.rows, maxRows);
           return formatSuccess({
-            rows: result.rows,
+            rows,
             count: result.rowCount,
-            database: params.database,
+            database: entry.database,
+            ...(truncated ? { truncatedAt: maxRows } : {}),
           });
         }
 
         case "commit": {
           if (!params.transactionId) return formatError("transactionId is required for commit");
-          const entry = transactionStore.get(params.transactionId);
+          // Claim first: if the TTL fires concurrently it will find nothing to take.
+          const entry = transactionStore.take(params.transactionId);
           if (!entry) return formatError(`Transaction not found: ${params.transactionId}`, "TX_NOT_FOUND");
           await entry.handle.commit();
-          transactionStore.remove(params.transactionId);
           return formatSuccess({
             data: { message: "Transaction committed" },
-            database: params.database,
+            database: entry.database,
           });
         }
 
         case "rollback": {
           if (!params.transactionId) return formatError("transactionId is required for rollback");
-          const entry = transactionStore.get(params.transactionId);
+          const entry = transactionStore.take(params.transactionId);
           if (!entry) return formatError(`Transaction not found: ${params.transactionId}`, "TX_NOT_FOUND");
           await entry.handle.rollback();
-          transactionStore.remove(params.transactionId);
           return formatSuccess({
             data: { message: "Transaction rolled back" },
-            database: params.database,
+            database: entry.database,
           });
         }
 
@@ -146,7 +154,7 @@ export function transactionHandler(manager: ConnectorManager) {
           return formatError(`Unknown action: ${params.action}`);
       }
     } catch (err) {
-      return formatError(String(err));
+      return formatCaughtError(err);
     }
   };
 }

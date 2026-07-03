@@ -1,7 +1,8 @@
-import { createClient, type ClickHouseClient } from "@clickhouse/client";
 import { readFileSync } from "node:fs";
-import type { Connector, QueryResult, TableInfo, ColumnInfo, ExplainResult, TransactionHandle } from "./interface.js";
+import { type ClickHouseClient, createClient } from "@clickhouse/client";
 import type { ClickHouseConfig } from "../config/types.js";
+import { wrapReadonlyQuery } from "../utils/sql-validator.js";
+import type { ColumnInfo, Connector, ExplainResult, QueryResult, TableInfo, TransactionHandle } from "./interface.js";
 
 export class ClickHouseConnector implements Connector {
   readonly type = "clickhouse" as const;
@@ -51,9 +52,15 @@ export class ClickHouseConnector implements Connector {
 
   async query(sql: string, _params?: string[], maxRows?: number): Promise<QueryResult> {
     const limit = maxRows ?? this.maxRows;
-    // trailing ";" inside the subselect wrapper is a syntax error
-    const wrappedSql = `SELECT * FROM (${sql.trim().replace(/;+\s*$/, "")}) AS _q LIMIT ${limit}`;
-    const result = await this.getClient().query({ query: wrappedSql, format: "JSONEachRow" });
+    const wrappedSql = wrapReadonlyQuery(sql, limit, "clickhouse");
+    // The sql-validator deny-list is the primary guard against url()/file()/s3() SSRF; readonly:1
+    // is defense-in-depth (it reliably blocks writes and settings changes, not necessarily every
+    // read-side table function).
+    const result = await this.getClient().query({
+      query: wrappedSql,
+      format: "JSONEachRow",
+      clickhouse_settings: { readonly: "1" },
+    });
     const rows = (await result.json()) as Record<string, unknown>[];
     return { rows, rowCount: rows.length };
   }

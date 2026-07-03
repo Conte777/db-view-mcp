@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
-import { formatSuccess, formatError } from "../../utils/response.js";
-import { resolveDbId } from "../../utils/resolve-db.js";
+import { formatCaughtError, formatSuccess } from "../../utils/response.js";
+
+export function capRows<T>(rows: T[], max: number): { rows: T[]; truncated: boolean } {
+  if (rows.length <= max) return { rows, truncated: false };
+  return { rows: rows.slice(0, max), truncated: true };
+}
 
 export function createExecuteParams(dbIds: string[]) {
   return {
@@ -14,16 +18,18 @@ export function createExecuteParams(dbIds: string[]) {
 export function executeHandler(manager: ConnectorManager) {
   return async (params: { database: string; statement: string; params?: string[] }) => {
     try {
-      const database = resolveDbId(manager.getDatabaseIds(), params.database);
-      const connector = await manager.getConnector(database);
+      const { id: database, connector } = await manager.acquire(params.database);
       const result = await connector.execute(params.statement, params.params);
+      const maxRows = manager.getConfig(database)!.maxRows;
+      const { rows, truncated } = capRows(result.rows, maxRows);
       return formatSuccess({
-        rows: result.rows,
+        rows,
         count: result.rowCount,
         database,
+        ...(truncated ? { truncatedAt: maxRows } : {}),
       });
     } catch (err) {
-      return formatError(String(err));
+      return formatCaughtError(err);
     }
   };
 }

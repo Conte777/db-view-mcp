@@ -1,8 +1,7 @@
 import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
-import { formatSuccess, formatError } from "../../utils/response.js";
+import { formatCaughtError, formatError, formatSuccess } from "../../utils/response.js";
 import { validateReadonlySql } from "../../utils/sql-validator.js";
-import { resolveDbId } from "../../utils/resolve-db.js";
 
 export function createExplainParams(dbIds: string[]) {
   return {
@@ -19,12 +18,11 @@ export function explainHandler(manager: ConnectorManager) {
       return formatError(validation.error!, "READONLY_VIOLATION");
     }
     try {
-      const database = resolveDbId(manager.getDatabaseIds(), params.database);
-      const connector = await manager.getConnector(database);
-      const result = await connector.explain(params.sql, params.analyze ?? false);
+      const { id: database, connector } = await manager.acquire(params.database);
+      const result = await connector.explain(validation.normalizedSql ?? params.sql, params.analyze ?? false);
       return formatSuccess({ data: result.plan, database });
     } catch (err) {
-      return formatError(String(err));
+      return formatCaughtError(err);
     }
   };
 }

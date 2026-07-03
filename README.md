@@ -261,6 +261,32 @@ The `transport` field is optional. When omitted, stdio is used. The `--transport
 | `lazyConnection` | boolean | `true` | Connect on first use instead of at startup |
 | `toolsPerDatabase` | boolean | `false` | Register separate tools per database (e.g. `query_main_pg`) |
 | `queryTimeout` | number | `30000` | Query timeout in milliseconds |
+| `logLevel` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` | `"info"` | Log verbosity |
+| `rowFormat` | `"json"` \| `"table"` | `"json"` | Row rendering for query results. `"table"` emits a compact pipe-table (`rowsTable`) instead of a `rows` array to save tokens |
+
+### Row format (table mode)
+
+Set `"rowFormat": "table"` in defaults to shrink row payloads for LLM consumption. Instead of a JSON `rows` array, responses carry a `rowsTable` string: a header line of column names followed by one line per row, cells joined by `|`.
+
+```json
+// rowFormat: "json" (default)
+{ "success": true, "rows": [{ "id": 1, "name": "Ann" }, { "id": 2, "name": null }], "count": 2 }
+
+// rowFormat: "table"
+{ "success": true, "rowsTable": "id|name\n1|Ann\n2|NULL", "count": 2 }
+```
+
+Cell conventions (applied after binary/oversized-string sanitization):
+
+- `null` or a missing key → bare `NULL` (non-finite numbers too, matching JSON-mode coercion)
+- the literal string `"NULL"` → quoted `"NULL"`, to disambiguate from the marker above
+- empty string → empty cell
+- numbers/booleans/bigints/dates → `String(value)` (dates as ISO 8601)
+- objects/arrays → compact `JSON.stringify`
+- then escaped in order: `\` → `\\`, `|` → `\|`, newline → `\n`, carriage return → `\r`
+- string cells additionally escape `"` → `\"`, so a string that looks like the quoted marker or a serialized object stays distinguishable from the real thing
+
+Column names in the header are escaped the same way. Row payloads over the size cap are truncated identically to JSON mode (fewer rows, `truncated: true`, `returnedRows` set).
 
 ### PostgreSQL database
 
@@ -268,16 +294,21 @@ The `transport` field is optional. When omitted, stdio is used. The `--transport
 |-------|----------|---------|-------------|
 | `id` | yes | — | Unique identifier |
 | `type` | yes | — | Must be `"postgresql"` |
-| `host` | yes | — | Hostname |
+| `connectionString` | no* | — | Full connection URI; alternative to `host` + `database` + `user` |
+| `host` | no* | — | Hostname |
 | `port` | no | `5432` | Port |
-| `database` | yes | — | Database name |
-| `user` | yes | — | Username |
+| `database` | no* | — | Database name |
+| `user` | no* | — | Username |
 | `password` | no | `""` | Password |
 | `ssl` | no | — | Enable SSL |
+| `sslCa` | no | — | Path to CA certificate for SSL |
+| `sslRejectUnauthorized` | no | `true` | Verify the server certificate |
 | `description` | no | — | Human-readable label |
 | `lazyConnection` | no | inherits | Override default |
 | `maxRows` | no | inherits | Override default |
 | `queryTimeout` | no | inherits | Override default |
+
+\* Either `connectionString`, or `host` + `database` + `user` together, must be provided.
 
 ### ClickHouse database
 
@@ -297,6 +328,24 @@ The `transport` field is optional. When omitted, stdio is used. The `--transport
 ### Per-database tool mode
 
 Set `"toolsPerDatabase": true` in defaults to register a separate tool for each database. Instead of a single `query` tool with a `database` parameter, you get `query_main_pg`, `query_analytics`, etc. Useful when connecting many databases to avoid parameter confusion.
+
+### Environment variable substitution
+
+Any string value in the config file may reference an environment variable with `${VAR_NAME}` syntax. Substitution runs recursively over the whole parsed JSON (strings, arrays, and nested objects) before validation, and a single string can contain multiple `${...}` placeholders:
+
+```json
+{
+  "databases": [
+    {
+      "id": "main_pg",
+      "type": "postgresql",
+      "connectionString": "postgresql://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:5432/myapp"
+    }
+  ]
+}
+```
+
+If a referenced variable is not set in the environment, config loading fails immediately with an error naming the missing variable — there is no silent fallback to an empty string or the literal placeholder.
 
 ## Architecture
 

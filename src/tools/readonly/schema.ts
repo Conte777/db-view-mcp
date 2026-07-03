@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
-import { formatSuccess, formatError } from "../../utils/response.js";
-import { resolveDbId } from "../../utils/resolve-db.js";
+import { formatCaughtError, formatSuccess } from "../../utils/response.js";
 
 export function createSchemaParams(dbIds: string[]) {
   return {
@@ -13,12 +12,11 @@ export function createSchemaParams(dbIds: string[]) {
 export function schemaHandler(manager: ConnectorManager) {
   return async (params: { database: string; schema?: string }) => {
     try {
-      const database = resolveDbId(manager.getDatabaseIds(), params.database);
-      const connector = await manager.getConnector(database);
+      const { id: database, connector } = await manager.acquire(params.database);
       const ddl = await connector.getSchema(params.schema);
       return formatSuccess({ data: ddl, database });
     } catch (err) {
-      return formatError(String(err));
+      return formatCaughtError(err);
     }
   };
 }

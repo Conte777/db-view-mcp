@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { ConnectorManager } from "../../connectors/manager.js";
-import { formatSuccess, formatError } from "../../utils/response.js";
-import { resolveDbId } from "../../utils/resolve-db.js";
+import { formatCaughtError, formatError, formatSuccess } from "../../utils/response.js";
 
 interface SlowQuery {
   sql: string;
@@ -52,7 +51,9 @@ export function performanceHandler(manager: ConnectorManager) {
   const tracker = manager.getPerformanceTracker();
   return async (params: { database: string; action: string; threshold?: number; limit?: number }) => {
     try {
-      const database = resolveDbId(manager.getDatabaseIds(), params.database);
+      // resolveId (not acquire) on purpose: this tool reads in-memory metrics and must keep
+      // working even when the target database is down or lazily unconnected.
+      const database = manager.resolveId(params.database);
       switch (params.action) {
         case "getSlowQueries":
           return formatSuccess({
@@ -78,7 +79,7 @@ export function performanceHandler(manager: ConnectorManager) {
           return formatError(`Unknown action: ${params.action}`);
       }
     } catch (err) {
-      return formatError(String(err));
+      return formatCaughtError(err);
     }
   };
 }

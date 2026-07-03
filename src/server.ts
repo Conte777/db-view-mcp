@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type AppConfig, resolveDbConfig } from "./config/types.js";
 import { ConnectorManager } from "./connectors/manager.js";
 import { registerTools } from "./tools/registry.js";
-import { resolveDbConfig, type AppConfig } from "./config/types.js";
+import { setRowFormat } from "./utils/response.js";
 
 export function createConnectorManager(config: AppConfig): ConnectorManager {
   const resolvedDbs = config.databases.map((db) => resolveDbConfig(db, config.defaults));
@@ -13,6 +14,7 @@ export function createMcpServerInstance(manager: ConnectorManager, config: AppCo
     name: "db-view-mcp",
     version: "1.0.0",
   });
+  setRowFormat(config.defaults.rowFormat);
   registerTools(server, manager, config.defaults);
   return server;
 }
