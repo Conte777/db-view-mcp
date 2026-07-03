@@ -1,11 +1,16 @@
 pre-commit:
   parallel: false
   commands:
-    lint:
-      run: npx biome lint --no-errors-on-unmatched {staged_files}
+    format:
+      run: npx biome format --write --no-errors-on-unmatched {staged_files}
       glob: "*.ts"
-    format-check:
-      run: npx biome format --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    lint:
+      run: npx biome lint --error-on-warnings --no-errors-on-unmatched {staged_files}
       glob: "*.ts"
     typecheck:
       run: npx tsc --noEmit
+      glob: "*.ts"
+    test:
+      run: npx vitest run
+      glob: "*.ts"

@@ -31,6 +31,14 @@
     "postgresql",
     "clickhouse"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/conte777/db-view-mcp.git"
+  },
+  "homepage": "https://github.com/conte777/db-view-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/conte777/db-view-mcp/issues"
+  },
   "license": "MIT",
   "dependencies": {
     "@clickhouse/client": "^1.17.0",
