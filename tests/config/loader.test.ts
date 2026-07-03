@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resolveEnvVariables } from "../../src/config/loader.js";
+import { loadConfig, parseCliArgs, resolveEnvVariables } from "../../src/config/loader.js";
 
 describe("resolveEnvVariables", () => {
   const originalEnv = { ...process.env };
@@ -57,5 +60,80 @@ describe("resolveEnvVariables", () => {
 
   it("throws with the original reference format", () => {
     expect(() => resolveEnvVariables("${NOPE}")).toThrow("${NOPE}");
+  });
+});
+
+describe("parseCliArgs", () => {
+  it("throws when --config is absent", () => {
+    expect(() => parseCliArgs([])).toThrow("Usage:");
+  });
+
+  it("throws when --config has no value", () => {
+    expect(() => parseCliArgs(["--config"])).toThrow("Usage:");
+  });
+
+  it("returns the config path", () => {
+    expect(parseCliArgs(["--config", "/x/config.json"])).toEqual({ configPath: "/x/config.json" });
+  });
+
+  it("accepts a valid transport", () => {
+    expect(parseCliArgs(["--config", "c.json", "--transport", "http"]).transport).toBe("http");
+  });
+
+  it("throws on an invalid transport", () => {
+    expect(() => parseCliArgs(["--config", "c.json", "--transport", "ftp"])).toThrow("Invalid transport");
+  });
+
+  it("ignores a trailing --transport with no value", () => {
+    expect(parseCliArgs(["--config", "c.json", "--transport"]).transport).toBeUndefined();
+  });
+});
+
+describe("loadConfig", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "db-view-cfg-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writeConfig(content: string): string {
+    const path = join(dir, "config.json");
+    writeFileSync(path, content);
+    return path;
+  }
+
+  it("reads, interpolates env and validates a config file", () => {
+    process.env.CFG_HOST = "db.local";
+    const path = writeConfig(
+      JSON.stringify({
+        databases: [{ id: "pg", type: "postgresql", host: "${CFG_HOST}", database: "d", user: "u" }],
+      }),
+    );
+    const cfg = loadConfig(path);
+    expect((cfg.databases[0] as { host?: string }).host).toBe("db.local");
+    expect(cfg.transport.type).toBe("stdio"); // default
+    expect(cfg.defaults.maxRows).toBe(100); // default
+    delete process.env.CFG_HOST;
+  });
+
+  it("throws on malformed JSON", () => {
+    expect(() => loadConfig(writeConfig("{ not json "))).toThrow();
+  });
+
+  it("throws on an undefined env variable", () => {
+    const path = writeConfig(
+      JSON.stringify({
+        databases: [{ id: "pg", type: "postgresql", host: "${MISSING_ENV_XYZ}", database: "d", user: "u" }],
+      }),
+    );
+    expect(() => loadConfig(path)).toThrow('Environment variable "MISSING_ENV_XYZ"');
+  });
+
+  it("throws on a schema-invalid config (empty databases)", () => {
+    expect(() => loadConfig(writeConfig(JSON.stringify({ databases: [] })))).toThrow();
   });
 });

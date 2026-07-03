@@ -92,6 +92,37 @@ describe("ConnectorManager", () => {
   it("invalidateConnector does not throw for non-connected db", () => {
     expect(() => manager.invalidateConnector("test_pg")).not.toThrow();
   });
+
+  it("invalidateConnector disconnects and drops a live connector", async () => {
+    const fake = makeFakeConnector();
+    (manager as unknown as ManagerWithCreateConnector).createConnector = () => fake;
+    await manager.getConnector("test_pg");
+    manager.invalidateConnector("test_pg");
+    expect(fake.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("createConnector builds typed connectors and rejects unknown types", () => {
+    const create = (manager as unknown as ManagerWithCreateConnector).createConnector.bind(manager);
+    expect(create(mockConfigs[0]).type).toBe("postgresql");
+    expect(create(mockConfigs[1]).type).toBe("clickhouse");
+    expect(() => create({ ...mockConfigs[0], type: "mongo" } as unknown as ResolvedDatabaseConfig)).toThrow(
+      "Unsupported database type",
+    );
+  });
+});
+
+describe("ConnectorManager eager connect / disconnectAll", () => {
+  it("connectEager connects only non-lazy dbs and disconnectAll tears them down", async () => {
+    const manager = new ConnectorManager([{ ...mockConfigs[0], lazyConnection: false }, mockConfigs[1]]);
+    const fake = makeFakeConnector();
+    (manager as unknown as ManagerWithCreateConnector).createConnector = () => fake;
+
+    await manager.connectEager();
+    expect(fake.connect).toHaveBeenCalledOnce(); // only the eager pg, ch stays lazy
+
+    await manager.disconnectAll();
+    expect(fake.disconnect).toHaveBeenCalledOnce();
+  });
 });
 
 describe("ConnectorManager.getConnector concurrency (in-flight connect guard)", () => {
