@@ -33,11 +33,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/conte777/db-view-mcp.git"
+    "url": "git+https://github.com/Conte777/db-view-mcp.git"
   },
-  "homepage": "https://github.com/conte777/db-view-mcp#readme",
+  "homepage": "https://github.com/Conte777/db-view-mcp#readme",
   "bugs": {
-    "url": "https://github.com/conte777/db-view-mcp/issues"
+    "url": "https://github.com/Conte777/db-view-mcp/issues"
   },
   "license": "MIT",
   "dependencies": {
