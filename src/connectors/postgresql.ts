@@ -36,8 +36,6 @@ export class PostgresConnector implements Connector {
           ssl: sslConfig,
           max: 10,
           query_timeout: this.queryTimeout,
-          // query_timeout only rejects client-side; statement_timeout makes the server cancel the query too
-          statement_timeout: this.queryTimeout,
         }
       : {
           host: this.config.host,
@@ -48,7 +46,6 @@ export class PostgresConnector implements Connector {
           ssl: sslConfig,
           max: 10,
           query_timeout: this.queryTimeout,
-          statement_timeout: this.queryTimeout,
         };
 
     this.pool = new pg.Pool(poolOptions);
@@ -76,6 +73,8 @@ export class PostgresConnector implements Connector {
     const client = await this.getPool().connect();
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
+      // SET LOCAL instead of pool statement_timeout: pooler-safe (PgBouncer transaction mode rejects it as a startup param), scoped to this txn
+      await client.query(`SET LOCAL statement_timeout = ${this.queryTimeout}`);
       const result = await client.query(wrappedSql, params);
       await client.query("COMMIT");
       return { rows: result.rows, rowCount: result.rows.length };
@@ -174,6 +173,7 @@ export class PostgresConnector implements Connector {
     const client = await this.getPool().connect();
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
+      await client.query(`SET LOCAL statement_timeout = ${this.queryTimeout}`);
       const result = await client.query(`${prefix} ${sql}`);
       await client.query("COMMIT");
       const plan = result.rows.map((r: Record<string, unknown>) => r["QUERY PLAN"]).join("\n");

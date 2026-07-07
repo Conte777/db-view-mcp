@@ -78,8 +78,11 @@ Optional; every field has a default. Per-database overrides win over these (see 
 
 \* Either `connectionString`, **or** `host` + `database` + `user` together, must be provided.
 
-The connection pool is fixed at `max: 10`; `queryTimeout` is applied as both the pg client-side
-`query_timeout` and the server-side `statement_timeout`.
+The connection pool is fixed at `max: 10`. `queryTimeout` is applied as the pg client-side
+`query_timeout` pool option. The server-side `statement_timeout` is set per-transaction via
+`SET LOCAL` inside the READ ONLY transaction used by `query`/`explain` — not as a startup
+parameter — so it stays pooler-safe (PgBouncer in transaction mode rejects `statement_timeout`
+as a startup parameter).
 
 ## ClickHouse database
 
