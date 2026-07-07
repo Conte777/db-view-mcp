@@ -69,6 +69,7 @@ describe("PostgresConnector.explain", () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ "QUERY PLAN": "Seq Scan on t" }] })
       .mockResolvedValueOnce({ rows: [] });
 
@@ -76,18 +77,24 @@ describe("PostgresConnector.explain", () => {
 
     expect(res.plan).toBe("Seq Scan on t");
     expect(query).toHaveBeenNthCalledWith(1, "BEGIN TRANSACTION READ ONLY");
-    expect(query).toHaveBeenNthCalledWith(2, "EXPLAIN SELECT 1");
-    expect(query).toHaveBeenNthCalledWith(3, "COMMIT");
+    expect(query).toHaveBeenNthCalledWith(2, "SET LOCAL statement_timeout = 30000");
+    expect(query).toHaveBeenNthCalledWith(3, "EXPLAIN SELECT 1");
+    expect(query).toHaveBeenNthCalledWith(4, "COMMIT");
     expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("rolls back and releases when EXPLAIN ANALYZE fails", async () => {
     const release = vi.fn();
     const err = new Error("boom");
-    const query = vi.fn().mockResolvedValueOnce({ rows: [] }).mockRejectedValueOnce(err).mockResolvedValueOnce({});
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({});
 
     await expect(makeConnector({ query, release }).explain("SELECT 1", true)).rejects.toThrow("boom");
-    expect(query).toHaveBeenNthCalledWith(2, "EXPLAIN ANALYZE SELECT 1");
+    expect(query).toHaveBeenNthCalledWith(3, "EXPLAIN ANALYZE SELECT 1");
     expect(query).toHaveBeenCalledWith("ROLLBACK");
     expect(release).toHaveBeenCalledTimes(1);
   });
@@ -99,12 +106,14 @@ describe("PostgresConnector.query", () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // SET LOCAL
       .mockResolvedValueOnce({ rows: [{ a: 1 }] }) // wrapped select
       .mockResolvedValueOnce({ rows: [] }); // COMMIT
     const res = await makeConnector({ query, release }).query("SELECT a FROM t", ["p"], 25);
     expect(query).toHaveBeenNthCalledWith(1, "BEGIN TRANSACTION READ ONLY");
-    expect(query).toHaveBeenNthCalledWith(2, "SELECT * FROM (SELECT a FROM t) AS _q LIMIT 25", ["p"]);
-    expect(query).toHaveBeenNthCalledWith(3, "COMMIT");
+    expect(query).toHaveBeenNthCalledWith(2, "SET LOCAL statement_timeout = 30000");
+    expect(query).toHaveBeenNthCalledWith(3, "SELECT * FROM (SELECT a FROM t) AS _q LIMIT 25", ["p"]);
+    expect(query).toHaveBeenNthCalledWith(4, "COMMIT");
     expect(res).toEqual({ rows: [{ a: 1 }], rowCount: 1 });
     expect(release).toHaveBeenCalledTimes(1);
   });
@@ -113,7 +122,7 @@ describe("PostgresConnector.query", () => {
     const release = vi.fn();
     const query = vi.fn().mockResolvedValue({ rows: [] });
     await makeConnector({ query, release }).query("SELECT 1");
-    expect(query).toHaveBeenNthCalledWith(2, "SELECT * FROM (SELECT 1) AS _q LIMIT 100", undefined);
+    expect(query).toHaveBeenNthCalledWith(3, "SELECT * FROM (SELECT 1) AS _q LIMIT 100", undefined);
   });
 
   it("rolls back and rethrows on a query error", async () => {
@@ -250,7 +259,8 @@ describe("PostgresConnector.connect", () => {
     await new PostgresConnector(config, 30000, 100).connect();
     const opts = poolSpy.mock.calls[0][0]!;
     expect(opts.host).toBe("localhost");
-    expect(opts.statement_timeout).toBe(30000);
+    expect(opts.query_timeout).toBe(30000);
+    expect(opts.statement_timeout).toBeUndefined();
     expect(fakePool.connect).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
     poolSpy.mockRestore();
