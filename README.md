@@ -1,5 +1,8 @@
 # db-view-mcp
 
+[![npm](https://img.shields.io/npm/v/@conte777/db-view-mcp)](https://www.npmjs.com/package/@conte777/db-view-mcp)
+[![CI](https://github.com/Conte777/db-view-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Conte777/db-view-mcp/actions/workflows/ci.yml)
+
 An MCP server that gives AI assistants direct access to PostgreSQL and ClickHouse databases. It
 supports both stdio and HTTP transports, for local IDE integration and remote network access.
 
