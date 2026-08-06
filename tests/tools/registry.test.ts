@@ -51,6 +51,26 @@ describe("registerTools parameter mode", () => {
       "transaction",
     ]);
   });
+
+  it("annotates read-only tools with readOnlyHint and write tools without it", () => {
+    const { server, tool } = makeServer();
+    registerTools(server, new ConnectorManager(configs), defaults);
+    const hintOf = (name: string) =>
+      (tool.mock.calls.find((c) => c[0] === name)![3] as { readOnlyHint: boolean }).readOnlyHint;
+    for (const name of [
+      "query",
+      "list_databases",
+      "list_tables",
+      "describe_table",
+      "schema",
+      "explain_query",
+      "performance",
+    ]) {
+      expect(hintOf(name)).toBe(true);
+    }
+    expect(hintOf("execute")).toBe(false);
+    expect(hintOf("transaction")).toBe(false);
+  });
 });
 
 describe("registerTools per-database mode", () => {
@@ -69,7 +89,7 @@ describe("registerTools per-database mode", () => {
     const manager = new ConnectorManager(configs);
     const acquireSpy = vi.spyOn(manager, "acquire").mockRejectedValue(new Error("stop"));
     registerTools(server, manager, { ...defaults, toolsPerDatabase: true });
-    const handler = tool.mock.calls.find((c) => c[0] === "query_main_pg")![3] as (p: unknown) => Promise<unknown>;
+    const handler = tool.mock.calls.find((c) => c[0] === "query_main_pg")![4] as (p: unknown) => Promise<unknown>;
     await handler({ sql: "SELECT 1" });
     expect(acquireSpy).toHaveBeenCalledWith("main_pg");
   });
