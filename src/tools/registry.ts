@@ -12,6 +12,10 @@ import { createPerformanceParams, performanceHandler } from "./readonly/performa
 import { createExecuteParams, executeHandler } from "./write/execute.js";
 import { createTransactionParams, transactionHandler } from "./write/transaction.js";
 
+// MCP hints: clients (e.g. Claude Code plan mode) gate tools on these; enforcement stays in validateReadonlySql
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const WRITE = { readOnlyHint: false, destructiveHint: true, openWorldHint: false };
+
 export function registerTools(server: McpServer, manager: ConnectorManager, defaults: Defaults) {
   const dbIds = manager.getDatabaseIds();
 
@@ -27,15 +31,17 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "query",
     `Execute a read-only SQL query. Available databases: ${dbIds.join(", ")}`,
     createQueryToolParams(dbIds),
+    READ_ONLY,
     queryToolHandler(manager),
   );
 
-  server.tool("list_databases", "List all configured databases", {}, listDatabasesHandler(manager));
+  server.tool("list_databases", "List all configured databases", {}, READ_ONLY, listDatabasesHandler(manager));
 
   server.tool(
     "list_tables",
     `List tables in a database. Available databases: ${dbIds.join(", ")}`,
     createListTablesParams(dbIds),
+    READ_ONLY,
     listTablesHandler(manager),
   );
 
@@ -43,6 +49,7 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "describe_table",
     `Describe table structure. Available databases: ${dbIds.join(", ")}`,
     createDescribeTableParams(dbIds),
+    READ_ONLY,
     describeTableHandler(manager),
   );
 
@@ -50,6 +57,7 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "schema",
     `Get full database schema (DDL). Available databases: ${dbIds.join(", ")}`,
     createSchemaParams(dbIds),
+    READ_ONLY,
     schemaHandler(manager),
   );
 
@@ -57,6 +65,7 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "explain_query",
     `Run EXPLAIN ANALYZE on a query. Available databases: ${dbIds.join(", ")}`,
     createExplainParams(dbIds),
+    READ_ONLY,
     explainHandler(manager),
   );
 
@@ -64,6 +73,7 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "performance",
     `View performance metrics and slow queries. Available databases: ${dbIds.join(", ")}`,
     createPerformanceParams(dbIds),
+    READ_ONLY,
     performanceHandler(manager),
   );
 
@@ -71,6 +81,7 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "execute",
     `Execute a write SQL statement (INSERT, UPDATE, DELETE, DDL). Available databases: ${dbIds.join(", ")}`,
     createExecuteParams(dbIds),
+    WRITE,
     executeHandler(manager),
   );
 
@@ -78,6 +89,7 @@ function registerParameterTools(server: McpServer, manager: ConnectorManager, db
     "transaction",
     `Manage database transactions (begin, execute, commit, rollback). Available databases: ${dbIds.join(", ")}`,
     createTransactionParams(dbIds),
+    WRITE,
     transactionHandler(manager),
   );
 }
@@ -92,6 +104,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
       `query_${dbId}`,
       `Execute a read-only SQL query on ${dbId}${desc}`,
       { sql: createQueryToolParams(singleDbIds).sql, maxRows: createQueryToolParams(singleDbIds).maxRows },
+      READ_ONLY,
       async (params) => queryToolHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -99,6 +112,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
       `list_tables_${dbId}`,
       `List tables on ${dbId}${desc}`,
       { schema: createListTablesParams(singleDbIds).schema },
+      READ_ONLY,
       async (params) => listTablesHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -106,6 +120,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
       `describe_table_${dbId}`,
       `Describe table structure on ${dbId}${desc}`,
       { table: createDescribeTableParams(singleDbIds).table, schema: createDescribeTableParams(singleDbIds).schema },
+      READ_ONLY,
       async (params) => describeTableHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -113,6 +128,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
       `schema_${dbId}`,
       `Get full schema of ${dbId}${desc}`,
       { schema: createSchemaParams(singleDbIds).schema },
+      READ_ONLY,
       async (params) => schemaHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -120,6 +136,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
       `explain_query_${dbId}`,
       `Run EXPLAIN on ${dbId}${desc}`,
       { sql: createExplainParams(singleDbIds).sql, analyze: createExplainParams(singleDbIds).analyze },
+      READ_ONLY,
       async (params) => explainHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -131,6 +148,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
         threshold: createPerformanceParams(singleDbIds).threshold,
         limit: createPerformanceParams(singleDbIds).limit,
       },
+      READ_ONLY,
       async (params) => performanceHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -138,6 +156,7 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
       `execute_${dbId}`,
       `Execute write SQL on ${dbId}${desc}`,
       { statement: createExecuteParams(singleDbIds).statement, params: createExecuteParams(singleDbIds).params },
+      WRITE,
       async (params) => executeHandler(manager)({ database: dbId, ...params }),
     );
 
@@ -150,10 +169,11 @@ function registerPerDatabaseTools(server: McpServer, manager: ConnectorManager, 
         statement: createTransactionParams(singleDbIds).statement,
         params: createTransactionParams(singleDbIds).params,
       },
+      WRITE,
       async (params) => transactionHandler(manager)({ database: dbId, ...params }),
     );
   }
 
   // list_databases is always global
-  server.tool("list_databases", "List all configured databases", {}, listDatabasesHandler(manager));
+  server.tool("list_databases", "List all configured databases", {}, READ_ONLY, listDatabasesHandler(manager));
 }
